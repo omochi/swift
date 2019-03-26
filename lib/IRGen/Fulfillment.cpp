@@ -260,42 +260,50 @@ bool FulfillmentMap::searchNominalTypeMetadata(IRGenModule &IGM,
   if (!nominal->isGenericContext() || isa<ProtocolDecl>(nominal)) {
     return false;
   }
-
   bool hadFulfillment = false;
 
   GenericTypeRequirements requirements(IGM, nominal);
   requirements.enumerateFulfillments(
       IGM, type->getContextSubstitutionMap(IGM.getSwiftModule(), nominal),
       [&](unsigned reqtIndex, CanType arg,
-          Optional<ProtocolConformanceRef> conf) {
-    // Skip uninteresting type arguments.
-    if (!keys.hasInterestingType(arg))
-      return;
+          Optional<ProtocolConformanceRef> confOrNone) {
+        // Skip uninteresting type arguments.
+        if (!keys.hasInterestingType(arg))
+          return;
 
-    // If the fulfilled value is type metadata, refine the path.
-    if (!conf) {
-      auto argState = getPresumedMetadataStateForTypeArgument(metadataState);
-      MetadataPath argPath = path;
-      argPath.addNominalTypeArgumentComponent(reqtIndex);
-      hadFulfillment |=
-        searchTypeMetadata(IGM, arg, IsExact, argState, source,
-                           std::move(argPath), keys);
-      return;
-    }
+        // If the fulfilled value is type metadata, refine the path.
+        if (!confOrNone) {
+          auto argState =
+              getPresumedMetadataStateForTypeArgument(metadataState);
+          MetadataPath argPath = path;
+          argPath.addNominalTypeArgumentComponent(reqtIndex);
+          hadFulfillment |= searchTypeMetadata(
+              IGM, arg, IsExact, argState, source, std::move(argPath), keys);
+          return;
+        }
 
-    // Otherwise, it's a conformance.
+        // Otherwise, it's a conformance.
 
-    // Ignore it unless the type itself is interesting.
-    if (!keys.isInterestingType(arg))
-      return;
+        ProtocolConformanceRef conf = *confOrNone;
 
-    // Refine the path.
-    MetadataPath argPath = path;
-    argPath.addNominalTypeArgumentConformanceComponent(reqtIndex);
+        // Ignore it unless the type itself is interesting.
+        if (!keys.isInterestingType(arg))
+          return;
 
-    hadFulfillment |= searchWitnessTable(IGM, arg, conf->getRequirement(),
-                                         source, std::move(argPath), keys);
-  });
+        if (conf.isInvalid()) {
+          // Archetype has requirement but has not conformance for it.
+          // It happens when conformance is erased by equivalence group
+          // in building minimized generic signature in sema stage.
+          return;
+        }
+
+        // Refine the path.
+        MetadataPath argPath = path;
+        argPath.addNominalTypeArgumentConformanceComponent(reqtIndex);
+
+        hadFulfillment |= searchWitnessTable(IGM, arg, conf.getRequirement(),
+                                             source, std::move(argPath), keys);
+      });
 
   return hadFulfillment;
 }
