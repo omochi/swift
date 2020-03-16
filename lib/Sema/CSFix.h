@@ -165,6 +165,10 @@ enum class FixKind : uint8_t {
   /// Allow single tuple closure parameter destructuring into N arguments.
   AllowClosureParameterDestructuring,
 
+  /// A single argument have labeling failure - missing/extraneous or incorrect
+  /// label attached to the, fix it by suggesting proper label.
+  RelabelSingleArgument,
+
   /// If there is out-of-order argument, let's fix that by re-ordering.
   MoveOutOfOrderArgument,
 
@@ -1184,6 +1188,33 @@ private:
   }
 };
 
+class RelabelSingleArgument final : public ConstraintFix {
+  unsigned ArgIdx;
+  Identifier CorrectLabel;
+
+  RelabelSingleArgument(ConstraintSystem &cs, unsigned argIdx,
+                        Identifier correctLabel, ConstraintLocator *locator)
+      : ConstraintFix(cs, FixKind::RelabelSingleArgument, locator),
+        ArgIdx(argIdx), CorrectLabel(correctLabel) {}
+
+public:
+  static bool classof(const ConstraintFix *fix) {
+    return fix->getKind() == FixKind::RelabelSingleArgument;
+  }
+
+  std::string getName() const override { return "relabel an argument"; }
+
+  bool diagnose(const Solution &solution, bool asNote = false) const override;
+
+  bool coalesceAndDiagnose(const Solution &solution,
+                           ArrayRef<ConstraintFix *> secondaryFixes,
+                           bool asNote = false) const override;
+
+  static RelabelSingleArgument *create(ConstraintSystem &cs, unsigned argIdx,
+                                       Identifier correctLabel,
+                                       ConstraintLocator *locator);
+};
+
 class MoveOutOfOrderArgument final : public ConstraintFix {
   using ParamBinding = SmallVector<unsigned, 1>;
 
@@ -1200,11 +1231,19 @@ class MoveOutOfOrderArgument final : public ConstraintFix {
         Bindings(bindings.begin(), bindings.end()) {}
 
 public:
+  static bool classof(const ConstraintFix *fix) {
+    return fix->getKind() == FixKind::MoveOutOfOrderArgument;
+  }
+
   std::string getName() const override {
     return "move out-of-order argument to correct position";
   }
 
   bool diagnose(const Solution &solution, bool asNote = false) const override;
+
+  bool coalesceAndDiagnose(const Solution &solution,
+                           ArrayRef<ConstraintFix *> secondaryFixes,
+                           bool asNote = false) const override;
 
   static MoveOutOfOrderArgument *create(ConstraintSystem &cs,
                                         unsigned argIdx,

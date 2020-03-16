@@ -49,7 +49,10 @@ func instanceMethods(_ b: B) {
   b.performAdd(1, withValue:2, withValue2:3, withValue:4) // expected-error{{argument 'withValue' must precede argument 'withValue2'}} {{32-32=withValue:4, }} {{44-57=}}
   b.performAdd(1, withValue:2, withValue:4, withValue2: 3)
 
-  b.performAdd(1, 2, 3, 4) // expected-error{{missing argument labels 'withValue:withValue:withValue2:' in call}} {{19-19=withValue: }} {{22-22=withValue: }} {{25-25=withValue2: }}
+  b.performAdd(1, 2, 3, 4)
+  // expected-error@-1 {{missing argument label 'withValue:' in call}} {{19-19=withValue: }}
+  // expected-error@-2 {{missing argument label 'withValue:' in call}} {{22-22=withValue: }}
+  // expected-error@-3 {{missing argument label 'withValue2:' in call}} {{25-25=withValue2: }}
 
   // Both class and instance methods exist.
   _ = b.description
@@ -200,7 +203,7 @@ func testProtocols(_ b: B, bp: BProto) {
   var bp2 : BProto = b
   var b2 : B = bp // expected-error{{cannot convert value of type 'BProto' to specified type 'B'}}
   bp.method(1, with: 2.5 as Float)
-  bp.method(1, withFoo: 2.5) // expected-error{{incorrect argument label in call (have '_:withFoo:', expected '_:with:')}}
+  bp.method(1, withFoo: 2.5) // expected-error{{incorrect argument label in call (have 'withFoo:', expected 'with:')}}
   bp2 = b.getAsProto()
 
   var c1 : Cat1Proto = b

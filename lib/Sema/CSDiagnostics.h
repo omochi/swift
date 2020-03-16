@@ -1312,6 +1312,20 @@ private:
   }
 };
 
+class SingleLabelingFailure final : public FailureDiagnostic {
+  unsigned ArgIdx;
+  Identifier CorrectLabel;
+
+public:
+  SingleLabelingFailure(const Solution &solution, unsigned argIdx,
+                        Identifier correctLabel, ConstraintLocator *locator)
+      : FailureDiagnostic(solution, locator), ArgIdx(argIdx),
+        CorrectLabel(correctLabel) {}
+
+  bool diagnoseAsError() override;
+  bool diagnoseAsNote() override;
+};
+
 class OutOfOrderArgumentFailure final : public FailureDiagnostic {
   using ParamBinding = SmallVector<unsigned, 1>;
 

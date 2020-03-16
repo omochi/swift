@@ -5,7 +5,8 @@ import SwiftName
 func test() {
   // Function name remapping
   drawString("hello", x: 3, y: 5)
-  drawString("hello", 3, 5) // expected-error{{missing argument labels 'x:y:' in call}}
+  drawString("hello", 3, 5) // expected-error {{missing argument label 'x:' in call}}
+  // expected-error@-1 {{missing argument label 'y:' in call}}
 
   // Enum name remapping.
   var color: ColorKind = CT_red

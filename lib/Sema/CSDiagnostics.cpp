@@ -32,7 +32,9 @@
 #include "swift/AST/Stmt.h"
 #include "swift/AST/Types.h"
 #include "swift/Basic/SourceLoc.h"
+#include "swift/Basic/StringExtras.h"
 #include "swift/Parse/Lexer.h"
+#include "swift/Sema/IDETypeChecking.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallString.h"
 #include <string>
@@ -743,7 +745,8 @@ bool LabelingFailure::diagnoseAsNote() {
   const auto &choice = selectedOverload->choice;
   if (auto *decl = choice.getDeclOrNull()) {
     emitDiagnostic(decl, diag::candidate_expected_different_labels,
-                   stringifyLabels(argLabels), stringifyLabels(CorrectLabels));
+                   /*plural=*/true, stringifyLabels(argLabels),
+                   stringifyLabels(CorrectLabels));
     return true;
   }
 
@@ -4423,6 +4426,102 @@ bool ClosureParamDestructuringFailure::diagnoseAsError() {
   diag.fixItReplace(params->getSourceRange(), nameOS.str())
       .fixItInsert(bodyLoc, OS.str());
   return true;
+}
+
+bool SingleLabelingFailure::diagnoseAsError() {
+  auto *argExpr = getArgumentListExprFor(getLocator());
+  if (!argExpr)
+    return false;
+
+  const auto argList = getOriginalArgumentList(argExpr);
+
+  const auto isSubscript = isa<SubscriptExpr>(getRawAnchor());
+
+  const auto argLabel = argList.labels[ArgIdx];
+  const auto paramLabel = CorrectLabel;
+
+  SmallString<16> argStr;
+  argStr += argLabel.str();
+  argStr += ':';
+
+  SmallString<16> paramStr;
+  paramStr += paramLabel.str();
+  paramStr += ':';
+
+  auto addFixIts = [&](InFlightDiagnostic diag) {
+    if (paramLabel.empty()) {
+      diag.fixItRemoveChars(argList.labelLocs[ArgIdx],
+                            argList.args[ArgIdx]->getStartLoc());
+    } else {
+      bool newNameIsReserved = !canBeArgumentLabel(paramLabel.str());
+
+      llvm::SmallString<16> newStr;
+      if (newNameIsReserved)
+        newStr += "`";
+      newStr += paramLabel.str();
+      if (newNameIsReserved)
+        newStr += "`";
+
+      if (argLabel.empty()) {
+        newStr += ": ";
+        diag.fixItInsert(argList.args[ArgIdx]->getStartLoc(), newStr);
+      } else {
+        diag.fixItReplace(argList.labelLocs[ArgIdx], newStr);
+      }
+    }
+  };
+
+  // Emit the diagnostic.
+  if (paramLabel.empty()) {
+    addFixIts(emitDiagnostic(argList.labelLocs[ArgIdx],
+                             diag::extra_argument_labels,
+                             /*plural=*/false, argStr, isSubscript));
+  } else if (argLabel.empty()) {
+    addFixIts(emitDiagnostic(argList.args[ArgIdx]->getStartLoc(),
+                             diag::missing_argument_labels,
+                             /*plural=*/false, paramStr, isSubscript));
+  } else {
+    addFixIts(emitDiagnostic(argList.labelLocs[ArgIdx],
+                             diag::wrong_argument_labels,
+                             /*plural=*/false, argStr, paramStr, isSubscript));
+  }
+
+  return true;
+}
+
+bool SingleLabelingFailure::diagnoseAsNote() {
+  auto *argExpr = getArgumentListExprFor(getLocator());
+  if (!argExpr)
+    return false;
+
+  const auto argList = getOriginalArgumentList(argExpr);
+
+  const auto argLabel = argList.labels[ArgIdx];
+  const auto paramLabel = CorrectLabel;
+
+  SmallString<16> argStr;
+  argStr += argLabel.str();
+  argStr += ':';
+
+  SmallString<16> paramStr;
+  paramStr += paramLabel.str();
+  paramStr += ':';
+
+  if (auto selectedOverload = getChoiceFor(getLocator())) {
+    const auto &choice = selectedOverload->choice;
+    if (auto *decl = choice.getDeclOrNull()) {
+      if (argLabel.empty()) {
+        emitDiagnostic(decl, diag::candidate_expected_labeled, paramStr);
+      } else if (paramLabel.empty()) {
+        emitDiagnostic(decl, diag::candidate_expected_unlabeled, argStr);
+      } else {
+        emitDiagnostic(decl, diag::candidate_expected_different_labels,
+                       /*plural=*/false, argStr, paramStr);
+      }
+      return true;
+    }
+  }
+  return false;
 }
 
 bool OutOfOrderArgumentFailure::diagnoseAsError() {

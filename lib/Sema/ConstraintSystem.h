@@ -4736,18 +4736,28 @@ public:
   /// otherwise.
   virtual bool outOfOrderArgument(unsigned argIdx, unsigned prevArgIdx);
 
-  /// Indicates that the arguments need to be relabeled to match the parameters.
-  ///
-  /// \returns true to indicate that this should cause a failure, false
-  /// otherwise.
-  virtual bool relabelArguments(ArrayRef<Identifier> newNames);
-
   /// Indicates that the trailing closure argument at the given \c argIdx
   /// cannot be passed to the last parameter at \c paramIdx.
   ///
   /// \returns true to indicate that this should cause a failure, false
   /// otherwise.
   virtual bool trailingClosureMismatch(unsigned paramIdx, unsigned argIdx);
+};
+
+struct ArgumentBindingHelper {
+  struct Binding {
+    unsigned paramIdx;
+    unsigned argIdx;
+    Binding(unsigned paramIdx, unsigned argIdx)
+        : paramIdx(paramIdx), argIdx(argIdx) {}
+  };
+  SmallVector<Binding, 4> bindings;
+  SmallVector<Optional<unsigned>, 4> paramToBinding;
+  SmallVector<Optional<unsigned>, 4> argToBinding;
+
+  static ArgumentBindingHelper
+  fromParameterBindings(const SmallVectorImpl<ParamBinding> &parameterBindings,
+                        unsigned numArgs);
 };
 
 /// Match the call arguments (as described by the given argument type) to
