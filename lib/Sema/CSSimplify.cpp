@@ -55,10 +55,6 @@ bool MatchCallArgumentListener::outOfOrderArgument(unsigned argIdx,
   return true;
 }
 
-bool MatchCallArgumentListener::relabelArguments(ArrayRef<Identifier> newNames){
-  return true;
-}
-
 bool MatchCallArgumentListener::trailingClosureMismatch(
     unsigned paramIdx, unsigned argIdx) {
   return true;
@@ -213,6 +209,31 @@ static bool acceptsTrailingClosure(const AnyFunctionType::Param &param) {
       paramTy->isAny();
 }
 
+ArgumentBindingHelper ArgumentBindingHelper::fromParameterBindings(
+    const SmallVectorImpl<ParamBinding> &parameterBindings, unsigned numArgs) {
+  auto result = ArgumentBindingHelper();
+  result.paramToBinding.resize(parameterBindings.size());
+  result.argToBinding.resize(numArgs);
+  for (const auto paramIdx : indices(parameterBindings)) {
+    const auto &parameterBinding = parameterBindings[paramIdx];
+
+    // missing argument parameter
+    if (parameterBinding.empty())
+      continue;
+
+    const auto argIdx = parameterBinding[0];
+    // extra argument
+    if (numArgs <= argIdx)
+      continue;
+
+    const auto bindIdx = result.bindings.size();
+    result.bindings.push_back(Binding(paramIdx, argIdx));
+    result.paramToBinding[paramIdx] = bindIdx;
+    result.argToBinding[argIdx] = bindIdx;
+  }
+  return result;
+}
+
 // FIXME: This should return ConstraintSystem::TypeMatchResult instead
 //        to give more information to the solver about the failure.
 bool constraints::
@@ -234,7 +255,6 @@ matchCallArguments(SmallVectorImpl<AnyFunctionType::Param> &args,
   // Keep track of which arguments we have claimed from the argument tuple.
   unsigned numArgs = args.size();
   SmallVector<bool, 4> claimedArgs(numArgs, false);
-  SmallVector<Identifier, 4> actualArgNames;
   unsigned numClaimedArgs = 0;
 
   // Indicates whether any of the arguments are potentially out-of-order,
@@ -249,28 +269,6 @@ matchCallArguments(SmallVectorImpl<AnyFunctionType::Param> &args,
     // Make sure we can claim this argument.
     assert(argNumber != numArgs && "Must have a valid index to claim");
     assert(!claimedArgs[argNumber] && "Argument already claimed");
-
-    if (!actualArgNames.empty()) {
-      // We're recording argument names; record this one.
-      actualArgNames[argNumber] = expectedName;
-    } else if (args[argNumber].getLabel() != expectedName && !ignoreNameClash) {
-      // We have an argument name mismatch. Start recording argument names.
-      actualArgNames.resize(numArgs);
-
-      // Figure out previous argument names from the parameter bindings.
-      for (auto i : indices(params)) {
-        const auto &param = params[i];
-        bool firstArg = true;
-
-        for (auto argIdx : parameterBindings[i]) {
-          actualArgNames[argIdx] = firstArg ? param.getLabel() : Identifier();
-          firstArg = false;
-        }
-      }
-
-      // Record this argument name.
-      actualArgNames[argNumber] = expectedName;
-    }
 
     claimedArgs[argNumber] = true;
     ++numClaimedArgs;
@@ -644,135 +642,59 @@ matchCallArguments(SmallVectorImpl<AnyFunctionType::Param> &args,
     }
   }
 
-  // If any arguments were provided out-of-order, check whether we have
-  // violated any of the reordering rules.
   if (potentiallyOutOfOrder) {
-    // If we've seen label failures and now there is an out-of-order
-    // parameter (or even worse - OoO parameter with label re-naming),
-    // we most likely have no idea what would be the best
-    // diagnostic for this situation, so let's just try to re-label.
-    auto isOutOfOrderArgument = [&](unsigned toParamIdx, unsigned fromArgIdx,
-                                    unsigned toArgIdx) {
-      if (fromArgIdx <= toArgIdx) {
-        return false;
-      }
+    // Fix all labeling failures.
 
-      auto newLabel = args[fromArgIdx].getLabel();
-      auto oldLabel = args[toArgIdx].getLabel();
-
-      if (newLabel != params[toParamIdx].getLabel()) {
-        return false;
-      }
-
-      auto paramIdx = toParamIdx + 1;
-      for (; paramIdx < params.size(); ++paramIdx) {
-        // Looks like new position (excluding defaulted parameters),
-        // has a valid label.
-        if (oldLabel == params[paramIdx].getLabel())
-          break;
-
-        // If we are moving the the position with a different label
-        // and there is no default value for it, can't diagnose the
-        // problem as a simple re-ordering.
-        if (!paramInfo.hasDefaultArgument(paramIdx))
-          return false;
-      }
-
-      // label was not found
-      if (paramIdx == params.size()) {
-        return false;
-      }
-
-      return true;
+    auto isTrailingClosureArgument = [&](unsigned argIdx) -> bool {
+      return hasTrailingClosure && argIdx == numArgs - 1;
     };
 
-    SmallVector<unsigned, 4> paramToArgMap;
-    paramToArgMap.reserve(params.size());
-    {
-      unsigned argIdx = 0;
-      for (const auto &binding : parameterBindings) {
-        paramToArgMap.push_back(argIdx);
-        argIdx += binding.size();
-      }
-    }
+    const auto bindings = ArgumentBindingHelper::fromParameterBindings(
+        parameterBindings, numArgs);
 
-    // Enumerate the parameters and their bindings to see if any arguments are
-    // our of order
-    bool hadLabelMismatch = false;
+    bool hadIssue = false;
     for (const auto paramIdx : indices(params)) {
-      const auto toArgIdx = paramToArgMap[paramIdx];
-      const auto &binding = parameterBindings[paramIdx];
-      for (const auto paramBindIdx : indices(binding)) {
-        // We've found the parameter that has an out of order
-        // argument, and know the indices of the argument that
-        // needs to move (fromArgIdx) and the argument location
-        // it should move to (toArgIdx).
-        const auto fromArgIdx = binding[paramBindIdx];
+      const auto bindIdx = bindings.paramToBinding[paramIdx];
+      if (!bindIdx)
+        continue;
+      const auto &binding = bindings.bindings[*bindIdx];
 
-        // Does nothing for variadic tail.
-        if (params[paramIdx].isVariadic() && paramBindIdx > 0) {
-          assert(args[fromArgIdx].getLabel().empty());
+      const auto paramLabel = params[binding.paramIdx].getLabel();
+      const auto argLabel = args[binding.argIdx].getLabel();
+
+      // check label mismatch
+      if (!isTrailingClosureArgument(binding.argIdx) &&
+          paramLabel != argLabel) {
+        hadIssue = true;
+        if (argLabel.empty()) {
+          if (listener.missingLabel(binding.paramIdx))
+            return true;
+        } else if (paramLabel.empty()) {
+          if (listener.extraneousLabel(binding.paramIdx))
+            return true;
+        } else {
+          if (listener.incorrectLabel(binding.paramIdx))
+            return true;
+        }
+      }
+
+      // check out of order
+      for (unsigned leftArgIdx = 0; leftArgIdx < binding.argIdx; leftArgIdx++) {
+        const auto leftBindIdx = bindings.argToBinding[leftArgIdx];
+        if (!leftBindIdx)
           continue;
+        const auto &leftBinding = bindings.bindings[*leftBindIdx];
+        if (paramIdx <= leftBinding.paramIdx) {
+          hadIssue = true;
+          if (listener.outOfOrderArgument(binding.argIdx, leftArgIdx))
+            return true;
+          break;
         }
-
-        // First let's double check if out-of-order argument is nothing
-        // more than a simple label mismatch, because in situation where
-        // one argument requires label and another one doesn't, but caller
-        // doesn't provide either, problem is going to be identified as
-        // out-of-order argument instead of label mismatch.
-        const auto expectedLabel = params[paramIdx].getLabel();
-        const auto argumentLabel = args[fromArgIdx].getLabel();
-
-        if (argumentLabel != expectedLabel) {
-          // - The parameter is unnamed, in which case we try to fix the
-          //   problem by removing the name.
-          if (expectedLabel.empty()) {
-            hadLabelMismatch = true;
-            if (listener.extraneousLabel(paramIdx))
-              return true;
-          // - The argument is unnamed, in which case we try to fix the
-          //   problem by adding the name.
-          } else if (argumentLabel.empty()) {
-            hadLabelMismatch = true;
-            if (listener.missingLabel(paramIdx))
-              return true;
-          // - The argument label has a typo at the same position.
-          } else if (fromArgIdx == toArgIdx) {
-            hadLabelMismatch = true;
-            if (listener.incorrectLabel(paramIdx))
-              return true;
-          }
-        }
-
-        if (fromArgIdx == toArgIdx) {
-          // If the argument is in the right location, just continue
-          continue;
-        }
-
-        // This situation looks like out-of-order argument but it's hard
-        // to say exactly without considering other factors, because it
-        // could be invalid labeling too.
-        if (!hadLabelMismatch &&
-            isOutOfOrderArgument(paramIdx, fromArgIdx, toArgIdx))
-          return listener.outOfOrderArgument(fromArgIdx, toArgIdx);
-
-        SmallVector<Identifier, 8> expectedLabels;
-        llvm::transform(params, std::back_inserter(expectedLabels),
-                        [](const AnyFunctionType::Param &param) {
-                          return param.getLabel();
-                        });
-        return listener.relabelArguments(expectedLabels);
       }
     }
   }
 
-  // If no arguments were renamed, the call arguments match up with the
-  // parameters.
-  if (actualArgNames.empty())
-    return false;
-
-  // The arguments were relabeled; notify the listener.
-  return listener.relabelArguments(actualArgNames);
+  return false;
 }
 
 class ArgumentFailureTracker : public MatchCallArgumentListener {
@@ -784,7 +706,6 @@ class ArgumentFailureTracker : public MatchCallArgumentListener {
 
   SmallVector<std::pair<unsigned, AnyFunctionType::Param>, 4> MissingArguments;
   SmallVector<std::pair<unsigned, AnyFunctionType::Param>, 4> ExtraArguments;
-
 public:
   ArgumentFailureTracker(ConstraintSystem &cs,
                          SmallVectorImpl<AnyFunctionType::Param> &args,
@@ -836,16 +757,35 @@ public:
     return false;
   }
 
+  bool incorrectLabel(unsigned paramIndex, unsigned impact) {
+    if (!CS.shouldAttemptFixes())
+      return true;
+
+    // TODO(diagnostics): If re-labeling is mixed with extra arguments,
+    // let's produce a fix only for extraneous arguments for now,
+    // because they'd share a locator path which (currently) means
+    // one fix would overwrite another.
+    if (!ExtraArguments.empty()) {
+      CS.increaseScore(SK_Fix);
+      return false;
+    }
+
+    auto *fix = RelabelSingleArgument::create(CS, Bindings[paramIndex].front(),
+                                              Parameters[paramIndex].getLabel(),
+                                              CS.getConstraintLocator(Locator));
+    return CS.recordFix(fix, impact);
+  }
+
   bool missingLabel(unsigned paramIndex) override {
-    return !CS.shouldAttemptFixes();
+    return incorrectLabel(paramIndex, 1);
   }
 
   bool extraneousLabel(unsigned paramIndex) override {
-    return !CS.shouldAttemptFixes();
+    return incorrectLabel(paramIndex, 3);
   }
 
   bool incorrectLabel(unsigned paramIndex) override {
-    return !CS.shouldAttemptFixes();
+    return incorrectLabel(paramIndex, 4);
   }
 
   bool outOfOrderArgument(unsigned argIdx, unsigned prevArgIdx) override {
@@ -859,72 +799,21 @@ public:
         return false;
       }
 
+      Optional<unsigned> paramIdx;
+      for (auto i : indices(Bindings)) {
+        const auto Binding = Bindings[i];
+        if (Binding.size() > 0 && Binding[0] == argIdx) {
+          paramIdx = i;
+          break;
+        }
+      }
+
       auto *fix = MoveOutOfOrderArgument::create(
           CS, argIdx, prevArgIdx, Bindings, CS.getConstraintLocator(Locator));
       return CS.recordFix(fix);
     }
 
     return true;
-  }
-
-  bool relabelArguments(ArrayRef<Identifier> newLabels) override {
-    if (!CS.shouldAttemptFixes())
-      return true;
-
-    // TODO(diagnostics): If re-labeling is mixed with extra arguments,
-    // let's produce a fix only for extraneous arguments for now,
-    // because they'd share a locator path which (currently) means
-    // one fix would overwrite another.
-    if (!ExtraArguments.empty()) {
-      CS.increaseScore(SK_Fix);
-      return false;
-    }
-
-    auto *anchor = Locator.getBaseLocator()->getAnchor();
-    if (!anchor)
-      return true;
-
-    unsigned numExtraneous = 0;
-    unsigned numRenames = 0;
-    unsigned numOutOfOrder = 0;
-
-    for (unsigned i : indices(newLabels)) {
-      // It's already known how many arguments are missing,
-      // it would be accounted for in the impact.
-      if (i >= Arguments.size())
-        continue;
-
-      auto argLabel = Arguments[i].getLabel();
-      auto paramLabel = newLabels[i];
-
-      if (argLabel == paramLabel)
-        continue;
-
-      if (!argLabel.empty()) {
-        // Instead of this being a label mismatch which requires
-        // re-labeling, this could be an out-of-order argument
-        // instead which has a completely different impact.
-        if (llvm::count(newLabels, argLabel) == 1) {
-          ++numOutOfOrder;
-        } else if (paramLabel.empty()) {
-          ++numExtraneous;
-        } else {
-          ++numRenames;
-        }
-      }
-    }
-
-    auto *locator = CS.getConstraintLocator(Locator);
-    auto *fix = RelabelArguments::create(CS, newLabels, locator);
-    // Re-labeling fixes with extraneous/incorrect labels should be
-    // lower priority vs. other fixes on same/different overload(s)
-    // where labels did line up correctly.
-    //
-    // If there are not only labeling problems but also some of the
-    // arguments are missing, let's account of that in the impact.
-    auto impact = 1 + numOutOfOrder + numExtraneous * 2 + numRenames * 3 +
-                  MissingArguments.size() * 2;
-    return CS.recordFix(fix, impact);
   }
 
   bool trailingClosureMismatch(unsigned paramIdx, unsigned argIdx) override {
@@ -9221,6 +9110,7 @@ ConstraintSystem::SolutionKind ConstraintSystem::simplifyFixConstraint(
   case FixKind::RemoveReturn:
   case FixKind::RemoveAddressOf:
   case FixKind::AddMissingArguments:
+  case FixKind::RelabelSingleArgument:
   case FixKind::MoveOutOfOrderArgument:
   case FixKind::SkipUnhandledConstructInFunctionBuilder:
   case FixKind::UsePropertyWrapper:

@@ -47,9 +47,10 @@ X2(5).f2(5)
 func allkeywords1(x: Int, y: Int) { }
 
 // Missing keywords.
-allkeywords1(1, 2) // expected-error{{missing argument labels}} {{14-14=x: }} {{17-17=y: }}
-allkeywords1(x: 1, 2) // expected-error{{missing argument label 'y:' in call}} {{20-20=y: }}
-allkeywords1(1, y: 2) // expected-error{{missing argument label 'x:' in call}} {{14-14=x: }}
+allkeywords1(1, 2) // expected-error {{missing argument label 'x:' in call}} {{14-14=x: }}
+// expected-error@-1 {{missing argument label 'y:' in call}} {{17-17=y: }}
+allkeywords1(x: 1, 2) // expected-error {{missing argument label 'y:' in call}} {{20-20=y: }}
+allkeywords1(1, y: 2) // expected-error {{missing argument label 'x:' in call}} {{14-14=x: }}
 
 // If keyword is reserved, make sure to quote it. rdar://problem/21392294
 func reservedLabel(_ x: Int, `repeat`: Bool) {}
@@ -71,16 +72,19 @@ GenericCtor<Int>()  // expected-error{{missing argument for parameter 't' in cal
 // -------------------------------------------
 func nokeywords1(_ x: Int, _ y: Int) { }
 
-nokeywords1(x: 1, y: 1) // expected-error{{extraneous argument labels 'x:y:' in call}}{{13-16=}}{{19-22=}}
+nokeywords1(x: 1, y: 1) // expected-error {{extraneous argument label 'x:' in call}} {{13-16=}}
+// expected-error@-1 {{extraneous argument label 'y:' in call}} {{19-22=}}
 
 // -------------------------------------------
 // Some missing, some extraneous keywords
 // -------------------------------------------
 func somekeywords1(_ x: Int, y: Int, z: Int) { }
 
-somekeywords1(x: 1, y: 2, z: 3) // expected-error{{extraneous argument label 'x:' in call}}{{15-18=}}
-somekeywords1(1, 2, 3) // expected-error{{missing argument labels 'y:z:' in call}}{{18-18=y: }}{{21-21=z: }}
-somekeywords1(x: 1, 2, z: 3) // expected-error{{incorrect argument labels in call (have 'x:_:z:', expected '_:y:z:')}}{{15-18=}}{{21-21=y: }}
+somekeywords1(x: 1, y: 2, z: 3) // expected-error {{extraneous argument label 'x:' in call}} {{15-18=}}
+somekeywords1(1, 2, 3) // expected-error {{missing argument label 'y:' in call}} {{18-18=y: }}
+// expected-error@-1 {{missing argument label 'z:' in call}} {{21-21=z: }}
+somekeywords1(x: 1, 2, z: 3) // expected-error {{unnamed argument #2 must precede argument 'x'}} {{15-15=2, }} {{19-22=}}
+// expected-error@-1 {{incorrect argument label in call (have 'x:', expected 'y:')}} {{15-16=y}}
 
 
 // -------------------------------------------
@@ -106,7 +110,8 @@ defargs1(z: 3)
 defargs1(x: 1, z: 3)
 
 // Using defaults (out-of-order, error by SE-0060)
-defargs1(z: 3, y: 2, x: 1) // expected-error{{argument 'x' must precede argument 'z'}} {{10-10=x: 1, }} {{20-26=}}
+defargs1(z: 3, y: 2, x: 1) // expected-error {{argument 'x' must precede argument 'z'}} {{10-10=x: 1, }} {{20-26=}}
+// expected-error@-1 {{argument 'y' must precede argument 'z'}} {{10-10=y: 2, }} {{14-20=}}
 defargs1(x: 1, z: 3, y: 2) // expected-error{{argument 'y' must precede argument 'z'}} {{16-16=y: 2, }} {{20-26=}}
 defargs1(y: 2, x: 1) // expected-error{{argument 'x' must precede argument 'y'}} {{10-10=x: 1, }} {{14-20=}}
 
@@ -139,7 +144,8 @@ variadics1(x: 1, y: 2, 1, 2)
 variadics1(x: 1, y: 2, 1, 2, 3)
 
 // Using various (out-of-order)
-variadics1(1, 2, 3, 4, 5, x: 6, y: 7) // expected-error {{incorrect argument labels in call (have '_:_:_:_:_:x:y:', expected 'x:y:_:')}} {{12-12=x: }} {{15-15=y: }} {{27-30=}} {{33-36=}}
+variadics1(1, 2, 3, 4, 5, x: 6, y: 7) // expected-error {{argument 'x' must precede unnamed argument #1}} {{12-12=x: 6, }} {{25-31=}}
+// expected-error@-1 {{argument 'y' must precede unnamed argument #1}} {{12-12=y: 7, }} {{31-37=}}
 
 func variadics2(x: Int, y: Int = 2, z: Int...) { } // expected-note {{'variadics2(x:y:z:)' declared here}}
 
@@ -257,18 +263,20 @@ struct Variadics7 {
     f(bravo: 0, alpha: 1, 2, 3) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
 
     // typo A
-    f(alphax: 0, bravo: 3) // expected-error {{incorrect argument label in call (have 'alphax:bravo:', expected 'alpha:bravo:')}}
+    f(alphax: 0, bravo: 3) // expected-error {{incorrect argument label in call (have 'alphax:', expected 'alpha:')}}
     f(alphax: 0, 1, bravo: 3) // expected-error {{extra argument in call}}
     f(alphax: 0, 1, 2, bravo: 3) // expected-error {{extra arguments at positions #2, #3 in call}}
 
     // typo B
     f(bravox: 0) // expected-error {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
-    f(alpha: 0, bravox: 3) // expected-error {{incorrect argument label in call (have 'alpha:bravox:', expected 'alpha:bravo:')}}
-    f(alpha: 0, 1, bravox: 3) // expected-error {{incorrect argument label in call (have 'alpha:_:bravox:', expected 'alpha:_:bravo:')}}
-    f(alpha: 0, 1, 2, bravox: 3) // expected-error {{incorrect argument label in call (have 'alpha:_:_:bravox:', expected 'alpha:_:_:bravo:')}}
+    f(alpha: 0, bravox: 3) // expected-error {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
+    f(alpha: 0, 1, bravox: 3) // expected-error {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
+    f(alpha: 0, 1, 2, bravox: 3) // expected-error {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
 
     // OoO + typo A B
-    f(bravox: 0, alphax: 1) // expected-error {{incorrect argument labels in call (have 'bravox:alphax:', expected 'alpha:bravo:')}}
+    f(bravox: 0, alphax: 1) // expected-error {{incorrect argument label in call (have 'alphax:', expected 'alpha:')}}
+    // expected-error@-1 {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
+    // expected-error@-2 {{argument 'alphax' must precede argument 'bravox'}}
     f(bravox: 0, alphax: 1, 2) // expected-error {{extra argument in call}}
     f(bravox: 0, alphax: 1, 2, 3) // expected-error {{extra arguments at positions #3, #4 in call}}
   }
@@ -289,48 +297,68 @@ struct Variadics8 {
     f(alpha: 0, charlie: 3, bravo: 4) // expected-error {{argument 'bravo' must precede argument 'charlie'}}
     f(alpha: 0, 1, charlie: 3, bravo: 4) // expected-error {{argument 'bravo' must precede argument 'charlie'}}
     f(alpha: 0, 1, 2, charlie: 3, bravo: 4) // expected-error {{argument 'bravo' must precede argument 'charlie'}}
+
     // OoO CAB
-    f(charlie: 0, alpha: 1, bravo: 4) // expected-error {{incorrect argument labels in call (have 'charlie:alpha:bravo:', expected 'alpha:bravo:charlie:')}}
-    f(charlie: 0, alpha: 1, 2, bravo: 4) // expected-error {{incorrect argument labels in call (have 'charlie:alpha:_:bravo:', expected 'alpha:bravo:charlie:')}}
-    f(charlie: 0, alpha: 1, 2, 3, bravo: 4) // expected-error {{incorrect argument labels in call (have 'charlie:alpha:_:_:bravo:', expected 'alpha:bravo:charlie:')}}
+    f(charlie: 0, alpha: 1, bravo: 4) // expected-error {{argument 'alpha' must precede argument 'charlie'}}
+    // expected-error@-1 {{argument 'bravo' must precede argument 'charlie'}}
+    f(charlie: 0, alpha: 1, 2, bravo: 4) // expected-error {{argument 'alpha' must precede argument 'charlie'}}
+    // expected-error@-1 {{argument 'bravo' must precede argument 'charlie'}}
+    f(charlie: 0, alpha: 1, 2, 3, bravo: 4) // expected-error {{argument 'alpha' must precede argument 'charlie'}}
+    // expected-error@-1 {{argument 'bravo' must precede argument 'charlie'}}
+
     // OoO BAC
     f(bravo: 0, alpha: 1, charlie: 4) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
     f(bravo: 0, alpha: 1, 2, charlie: 4) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
     f(bravo: 0, alpha: 1, 2, 3, charlie: 4) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
 
     // typo A
-    f(alphax: 0, bravo: 3, charlie: 4) // expected-error {{incorrect argument label in call (have 'alphax:bravo:charlie:', expected 'alpha:bravo:charlie:')}}
+    f(alphax: 0, bravo: 3, charlie: 4) // expected-error {{incorrect argument label in call (have 'alphax:', expected 'alpha:')}}
     f(alphax: 0, 1, bravo: 3, charlie: 4) // expected-error {{extra argument in call}}
     f(alphax: 0, 1, 2, bravo: 3, charlie: 4) // expected-error {{extra arguments at positions #2, #3 in call}}
     // typo B
-    f(bravox: 3, charlie: 4) // expected-error {{incorrect argument label in call (have 'bravox:charlie:', expected 'bravo:charlie:')}}
-    f(alpha: 0, bravox: 3, charlie: 4) // expected-error {{incorrect argument label in call (have 'alpha:bravox:charlie:', expected 'alpha:bravo:charlie:')}}
-    f(alpha: 0, 1, bravox: 3, charlie: 4) // expected-error {{incorrect argument label in call (have 'alpha:_:bravox:charlie:', expected 'alpha:_:bravo:charlie:')}}
-    f(alpha: 0, 1, 2, bravox: 3, charlie: 4) // expected-error {{incorrect argument label in call (have 'alpha:_:_:bravox:charlie:', expected 'alpha:_:_:bravo:charlie:')}}
+    f(bravox: 3, charlie: 4) // expected-error {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
+    f(alpha: 0, bravox: 3, charlie: 4) // expected-error {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
+    f(alpha: 0, 1, bravox: 3, charlie: 4) // expected-error {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
+    f(alpha: 0, 1, 2, bravox: 3, charlie: 4) // expected-error {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
     // typo C
-    f(bravo: 3, charliex: 4) // expected-error {{incorrect argument label in call (have 'bravo:charliex:', expected 'bravo:charlie:')}}
-    f(alpha: 0, bravo: 3, charliex: 4) // expected-error {{incorrect argument label in call (have 'alpha:bravo:charliex:', expected 'alpha:bravo:charlie:')}}
-    f(alpha: 0, 1, bravo: 3, charliex: 4) // expected-error {{incorrect argument label in call (have 'alpha:_:bravo:charliex:', expected 'alpha:_:bravo:charlie:')}}
-    f(alpha: 0, 1, 2, bravo: 3, charliex: 4) // expected-error {{incorrect argument label in call (have 'alpha:_:_:bravo:charliex:', expected 'alpha:_:_:bravo:charlie:')}}
+    f(bravo: 3, charliex: 4) // expected-error {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
+    f(alpha: 0, bravo: 3, charliex: 4) // expected-error {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
+    f(alpha: 0, 1, bravo: 3, charliex: 4) // expected-error {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
+    f(alpha: 0, 1, 2, bravo: 3, charliex: 4) // expected-error {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
 
     // OoO ACB + typo B
-    f(alpha: 0, charlie: 3, bravox: 4) // expected-error {{incorrect argument labels in call (have 'alpha:charlie:bravox:', expected 'alpha:bravo:charlie:')}}
-    f(alpha: 0, 1, charlie: 3, bravox: 4) // expected-error {{incorrect argument labels in call (have 'alpha:_:charlie:bravox:', expected 'alpha:bravo:charlie:')}}
-    f(alpha: 0, 1, 2, charlie: 3, bravox: 4) // expected-error {{incorrect argument labels in call (have 'alpha:_:_:charlie:bravox:', expected 'alpha:bravo:charlie:')}}
+    f(alpha: 0, charlie: 3, bravox: 4) // expected-error {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
+    // expected-error@-1 {{argument 'bravox' must precede argument 'charlie'}}
+    f(alpha: 0, 1, charlie: 3, bravox: 4) // expected-error {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
+    // expected-error@-1 {{argument 'bravox' must precede argument 'charlie'}}
+    f(alpha: 0, 1, 2, charlie: 3, bravox: 4) // expected-error {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
+    // expected-error@-1 {{argument 'bravox' must precede argument 'charlie'}}
+
     // OoO ACB + typo C
-    f(charliex: 3, bravo: 4) // expected-error {{incorrect argument labels in call (have 'charliex:bravo:', expected 'alpha:bravo:charlie:')}}
-    f(alpha: 0, charliex: 3, bravo: 4) // expected-error {{incorrect argument labels in call (have 'alpha:charliex:bravo:', expected 'alpha:bravo:charlie:')}}
-    f(alpha: 0, 1, charliex: 3, bravo: 4) // expected-error {{incorrect argument labels in call (have 'alpha:_:charliex:bravo:', expected 'alpha:bravo:charlie:')}}
-    f(alpha: 0, 1, 2, charliex: 3, bravo: 4) // expected-error {{incorrect argument labels in call (have 'alpha:_:_:charliex:bravo:', expected 'alpha:bravo:charlie:')}}
+    f(charliex: 3, bravo: 4) // expected-error {{argument 'bravo' must precede argument 'charliex'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
+    f(alpha: 0, charliex: 3, bravo: 4) // expected-error {{argument 'bravo' must precede argument 'charliex'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
+    f(alpha: 0, 1, charliex: 3, bravo: 4) // expected-error {{argument 'bravo' must precede argument 'charliex'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
+    f(alpha: 0, 1, 2, charliex: 3, bravo: 4) // expected-error {{argument 'bravo' must precede argument 'charliex'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
 
     // OoO BAC + typo B
-    f(bravox: 0, alpha: 1, charlie: 4) // expected-error {{incorrect argument labels in call (have 'bravox:alpha:charlie:', expected 'alpha:bravo:charlie:')}}
-    f(bravox: 0, alpha: 1, 2, charlie: 4) // expected-error {{incorrect argument labels in call (have 'bravox:alpha:_:charlie:', expected 'alpha:bravo:charlie:')}}
-    f(bravox: 0, alpha: 1, 2, 3, charlie: 4) // expected-error {{incorrect argument labels in call (have 'bravox:alpha:_:_:charlie:', expected 'alpha:bravo:charlie:')}}
+    f(bravox: 0, alpha: 1, charlie: 4) // expected-error {{argument 'alpha' must precede argument 'bravox'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
+    f(bravox: 0, alpha: 1, 2, charlie: 4) // expected-error {{argument 'alpha' must precede argument 'bravox'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
+    f(bravox: 0, alpha: 1, 2, 3, charlie: 4) // expected-error {{argument 'alpha' must precede argument 'bravox'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
+
     // OoO BAC + typo C
     f(bravo: 0, alpha: 1, charliex: 4) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
     f(bravo: 0, alpha: 1, 2, charliex: 4) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
     f(bravo: 0, alpha: 1, 2, 3, charliex: 4) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
   }
 }
 
@@ -361,18 +389,19 @@ struct PositionsAroundDefaultsAndVariadics {
 
     f1(c: "3", [4])
 
-    f1(b: "2", [3]) // expected-error {{incorrect argument labels in call (have 'b:_:', expected '_:_:c:_:')}}
-    // expected-error@-1 {{cannot convert value of type '[Int]' to expected argument type 'Bool'}}
+    f1(b: "2", [3]) // expected-error {{unnamed argument #2 must precede argument 'b'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'b:', expected 'c:')}}
     
-    f1(b: "2", 1) // expected-error {{incorrect argument labels in call (have 'b:_:', expected '_:_:c:_:')}}
-    // expected-error@-1 {{type 'Int' cannot be used as a boolean; test for '!= 0' instead}}
+    f1(b: "2", 1) // expected-error {{unnamed argument #2 must precede argument 'b'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'b:', expected 'c:')}}
 
-    f1(b: "2", [3], 1) // expected-error {{incorrect argument labels in call (have 'b:_:_:', expected '_:_:c:_:')}}
-    // expected-error@-1 {{cannot convert value of type '[Int]' to expected argument type 'Bool'}}
+    f1(b: "2", [3], 1) // expected-error {{unnamed argument #2 must precede argument 'b'}}
+    // expected-error@-1 {{unnamed argument #3 must precede argument 'b'}}
+    // expected-error@-2 {{incorrect argument label in call (have 'b:', expected 'c:')}}
 
-    f1(b: "2", 1, [3]) // expected-error {{incorrect argument labels in call (have 'b:_:_:', expected '_:_:c:_:')}}
-    // expected-error@-1 {{type 'Int' cannot be used as a boolean; test for '!= 0' instead}}
-    // expected-error@-2 {{cannot convert value of type '[Int]' to expected argument type 'Int'}}
+    f1(b: "2", 1, [3]) // expected-error {{unnamed argument #2 must precede argument 'b'}}
+    // expected-error@-1 {{unnamed argument #3 must precede argument 'b'}}
+    // expected-error@-2 {{incorrect argument label in call (have 'b:', expected 'c:')}}
   }
 
   // unlabeled variadics before labeled parameter
@@ -420,12 +449,9 @@ struct PositionsAroundDefaultsAndVariadics {
 
     f2(c: "3", 21) // expected-error {{cannot convert value of type 'Int' to expected argument type '[Int]'}}
     
-    f2(c: "3", 21, [4]) // expected-error {{incorrect argument labels in call (have 'c:_:_:', expected '_:_:c:_:')}}
-    // expected-error@-1 {{cannot convert value of type 'Int' to expected argument type '[Int]'}}
-    // expected-error@-2 {{cannot convert value of type '[Int]' to expected argument type 'Bool'}}
+    f2(c: "3", 21, [4]) // expected-error {{unnamed argument #3 must precede argument 'c'}}
 
-    f2(c: "3", [4], 21) // expected-error {{incorrect argument labels in call (have 'c:_:_:', expected '_:_:c:_:')}}
-    // expected-error@-1 {{type 'Int' cannot be used as a boolean; test for '!= 0' instead}}
+    f2(c: "3", [4], 21) // expected-error {{unnamed argument #3 must precede argument 'c'}}
 
     f2([4]) // expected-error {{cannot convert value of type '[Int]' to expected argument type 'Bool'}}
 
@@ -561,7 +587,8 @@ struct PositionsAroundDefaultsAndVariadics {
 
     f5(true, c: 31, b: "2", d: [4]) // expected-error {{argument 'b' must precede argument 'c'}}
 
-    f5(true, b: "2", d: [4], 31) // expected-error {{incorrect argument labels in call (have '_:b:d:_:', expected '_:b:c:d:')}}
+    f5(true, b: "2", d: [4], 31) // expected-error {{unnamed argument #4 must precede argument 'd'}}
+    // expected-error@-1 {{missing argument label 'c:' in call}}
 
     f5(true, b: "2", c: 31)
     f5(true, b: "2")
@@ -627,7 +654,8 @@ extraargs1(x: 1, 2, 3) // expected-error{{extra arguments at positions #2, #3 in
 func mismatch1(thisFoo: Int = 0, bar: Int = 0, wibble: Int = 0) { } // expected-note {{'mismatch1(thisFoo:bar:wibble:)' declared here}}
 
 mismatch1(foo: 5) // expected-error {{extra argument 'foo' in call}}
-mismatch1(baz: 1, wobble: 2) // expected-error{{incorrect argument labels in call (have 'baz:wobble:', expected 'bar:wibble:')}} {{11-14=bar}} {{19-25=wibble}}
+mismatch1(baz: 1, wobble: 2) // expected-error {{incorrect argument label in call (have 'baz:', expected 'bar:')}} {{11-14=bar}}
+// expected-error@-1 {{incorrect argument label in call (have 'wobble:', expected 'wibble:')}} {{19-25=wibble}}
 mismatch1(food: 1, zap: 2) // expected-error{{extra arguments at positions #1, #2 in call}}
 
 // -------------------------------------------
@@ -642,14 +670,22 @@ struct OutOfOrderAndDefault {
 
   func test1() {
     // typo
-    f11(bravo: 0, alphax: 1) // expected-error {{incorrect argument labels in call (have 'bravo:alphax:', expected 'alpha:bravo:')}}
-    f11(bravox: 0, alpha: 1) // expected-error {{incorrect argument labels in call (have 'bravox:alpha:', expected 'alpha:bravo:')}}
-    f12(bravo: 0, alphax: 1) // expected-error {{incorrect argument labels in call (have 'bravo:alphax:', expected 'alpha:bravo:')}}
-    f12(bravox: 0, alpha: 1) // expected-error {{incorrect argument labels in call (have 'bravox:alpha:', expected 'alpha:bravo:')}}
-    f13(bravo: 0, alphax: 1) // expected-error {{incorrect argument labels in call (have 'bravo:alphax:', expected 'alpha:bravo:')}}
-    f13(bravox: 0, alpha: 1) // expected-error {{incorrect argument labels in call (have 'bravox:alpha:', expected 'alpha:bravo:')}}
-    f14(bravo: 0, alphax: 1) // expected-error {{incorrect argument labels in call (have 'bravo:alphax:', expected 'alpha:bravo:')}}
-    f14(bravox: 0, alpha: 1) // expected-error {{incorrect argument labels in call (have 'bravox:alpha:', expected 'alpha:bravo:')}}
+    f11(bravo: 0, alphax: 1) // expected-error {{incorrect argument label in call (have 'alphax:', expected 'alpha:')}}
+    // expected-error@-1 {{argument 'alphax' must precede argument 'bravo'}}
+    f11(bravox: 0, alpha: 1) // expected-error {{argument 'alpha' must precede argument 'bravox'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
+    f12(bravo: 0, alphax: 1) // expected-error {{incorrect argument label in call (have 'alphax:', expected 'alpha:')}}
+    // expected-error@-1 {{argument 'alphax' must precede argument 'bravo'}}
+    f12(bravox: 0, alpha: 1) // expected-error {{argument 'alpha' must precede argument 'bravox'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
+    f13(bravo: 0, alphax: 1) // expected-error {{incorrect argument label in call (have 'alphax:', expected 'alpha:')}}
+    // expected-error@-1 {{argument 'alphax' must precede argument 'bravo'}}
+    f13(bravox: 0, alpha: 1) // expected-error {{argument 'alpha' must precede argument 'bravox'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
+    f14(bravo: 0, alphax: 1) // expected-error {{incorrect argument label in call (have 'alphax:', expected 'alpha:')}}
+    // expected-error@-1 {{argument 'alphax' must precede argument 'bravo'}}
+    f14(bravox: 0, alpha: 1) // expected-error {{argument 'alpha' must precede argument 'bravox'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
   }
 
   func f21(alpha: Int, bravo: Int, charlie: Int) {}
@@ -658,37 +694,73 @@ struct OutOfOrderAndDefault {
 
   func test2() {
     // BAC
-    f21(bravo: 0, alphax: 1, charlie: 2) // expected-error {{incorrect argument labels in call (have 'bravo:alphax:charlie:', expected 'alpha:bravo:charlie:')}}
-    f21(bravox: 0, alpha: 1, charlie: 2) // expected-error {{incorrect argument labels in call (have 'bravox:alpha:charlie:', expected 'alpha:bravo:charlie:')}}
-    f21(bravo: 0, alpha: 1, charliex: 2) // expected-error {{'alpha' must precede argument 'bravo'}}
-    f22(bravo: 0, alphax: 1, charlie: 2) // expected-error {{incorrect argument labels in call (have 'bravo:alphax:charlie:', expected 'alpha:bravo:charlie:')}}
-    f22(bravox: 0, alpha: 1, charlie: 2) // expected-error {{incorrect argument labels in call (have 'bravox:alpha:charlie:', expected 'alpha:bravo:charlie:')}}
-    f22(bravo: 0, alpha: 1, charliex: 2) // expected-error {{'alpha' must precede argument 'bravo'}}
-    f23(bravo: 0, alphax: 1, charlie: 2) // expected-error {{incorrect argument labels in call (have 'bravo:alphax:charlie:', expected 'alpha:bravo:charlie:')}}
-    f23(bravox: 0, alpha: 1, charlie: 2) // expected-error {{incorrect argument labels in call (have 'bravox:alpha:charlie:', expected 'alpha:bravo:charlie:')}}
-    f23(bravo: 0, alpha: 1, charliex: 2) // expected-error {{'alpha' must precede argument 'bravo'}}
+    f21(bravo: 0, alphax: 1, charlie: 2) // expected-error {{incorrect argument label in call (have 'alphax:', expected 'alpha:')}}
+    // expected-error@-1 {{argument 'alphax' must precede argument 'bravo'}}
+    f21(bravox: 0, alpha: 1, charlie: 2) // expected-error {{argument 'alpha' must precede argument 'bravox'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
+    f21(bravo: 0, alpha: 1, charliex: 2) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
+    f22(bravo: 0, alphax: 1, charlie: 2) // expected-error {{incorrect argument label in call (have 'alphax:', expected 'alpha:')}}
+    // expected-error@-1 {{argument 'alphax' must precede argument 'bravo'}}
+    f22(bravox: 0, alpha: 1, charlie: 2) // expected-error {{argument 'alpha' must precede argument 'bravox'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
+    f22(bravo: 0, alpha: 1, charliex: 2) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
+    f23(bravo: 0, alphax: 1, charlie: 2) // expected-error {{incorrect argument label in call (have 'alphax:', expected 'alpha:')}}
+    // expected-error@-1 {{argument 'alphax' must precede argument 'bravo'}}
+    f23(bravox: 0, alpha: 1, charlie: 2) // expected-error {{argument 'alpha' must precede argument 'bravox'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
+    f23(bravo: 0, alpha: 1, charliex: 2) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
 
     // BCA
-    f21(bravo: 0, charlie: 1, alphax: 2) // expected-error {{incorrect argument labels in call (have 'bravo:charlie:alphax:', expected 'alpha:bravo:charlie:')}}
-    f21(bravox: 0, charlie: 1, alpha: 2) // expected-error {{incorrect argument labels in call (have 'bravox:charlie:alpha:', expected 'alpha:bravo:charlie:')}}
-    f21(bravo: 0, charliex: 1, alpha: 2) // expected-error {{'alpha' must precede argument 'bravo'}}
-    f22(bravo: 0, charlie: 1, alphax: 2) // expected-error {{incorrect argument labels in call (have 'bravo:charlie:alphax:', expected 'alpha:bravo:charlie:')}}
-    f22(bravox: 0, charlie: 1, alpha: 2) // expected-error {{incorrect argument labels in call (have 'bravox:charlie:alpha:', expected 'alpha:bravo:charlie:')}}
-    f22(bravo: 0, charliex: 1, alpha: 2) // expected-error {{'alpha' must precede argument 'bravo'}}
-    f23(bravo: 0, charlie: 1, alphax: 2) // expected-error {{incorrect argument labels in call (have 'bravo:charlie:alphax:', expected 'alpha:bravo:charlie:')}}
-    f23(bravox: 0, charlie: 1, alpha: 2) // expected-error {{incorrect argument labels in call (have 'bravox:charlie:alpha:', expected 'alpha:bravo:charlie:')}}
-    f23(bravo: 0, charliex: 1, alpha: 2) // expected-error {{'alpha' must precede argument 'bravo'}}
+    f21(bravo: 0, charlie: 1, alphax: 2) // expected-error {{incorrect argument label in call (have 'alphax:', expected 'alpha:')}}
+    // expected-error@-1 {{argument 'alphax' must precede argument 'bravo'}}
+    f21(bravox: 0, charlie: 1, alpha: 2) // expected-error {{argument 'alpha' must precede argument 'bravox'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
+    f21(bravo: 0, charliex: 1, alpha: 2) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
+    f22(bravo: 0, charlie: 1, alphax: 2) // expected-error {{incorrect argument label in call (have 'alphax:', expected 'alpha:')}}
+    // expected-error@-1 {{argument 'alphax' must precede argument 'bravo'}}
+    f22(bravox: 0, charlie: 1, alpha: 2) // expected-error {{argument 'alpha' must precede argument 'bravox'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
+    f22(bravo: 0, charliex: 1, alpha: 2) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
+    f23(bravo: 0, charlie: 1, alphax: 2) // expected-error {{incorrect argument label in call (have 'alphax:', expected 'alpha:')}}
+    // expected-error@-1 {{argument 'alphax' must precede argument 'bravo'}}
+    f23(bravox: 0, charlie: 1, alpha: 2) // expected-error {{argument 'alpha' must precede argument 'bravox'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
+    f23(bravo: 0, charliex: 1, alpha: 2) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
 
     // CAB
-    f21(charlie: 0, alphax: 1, bravo: 2) // expected-error {{incorrect argument labels in call (have 'charlie:alphax:bravo:', expected 'alpha:bravo:charlie:')}}
-    f21(charlie: 0, alpha: 1, bravox: 2) // expected-error {{incorrect argument labels in call (have 'charlie:alpha:bravox:', expected 'alpha:bravo:charlie:')}}
-    f21(charliex: 0, alpha: 1, bravo: 2) // expected-error {{incorrect argument labels in call (have 'charliex:alpha:bravo:', expected 'alpha:bravo:charlie:')}}
-    f22(charlie: 0, alphax: 1, bravo: 2) // expected-error {{incorrect argument labels in call (have 'charlie:alphax:bravo:', expected 'alpha:bravo:charlie:')}}
-    f22(charlie: 0, alpha: 1, bravox: 2) // expected-error {{incorrect argument labels in call (have 'charlie:alpha:bravox:', expected 'alpha:bravo:charlie:')}}
-    f22(charliex: 0, alpha: 1, bravo: 2) // expected-error {{incorrect argument labels in call (have 'charliex:alpha:bravo:', expected 'alpha:bravo:charlie:')}}
-    f23(charlie: 0, alphax: 1, bravo: 2) // expected-error {{incorrect argument labels in call (have 'charlie:alphax:bravo:', expected 'alpha:bravo:charlie:')}}
+    f21(charlie: 0, alphax: 1, bravo: 2) // expected-error {{incorrect argument label in call (have 'alphax:', expected 'alpha:')}}
+    // expected-error@-1 {{argument 'alphax' must precede argument 'charlie'}}
+    // expected-error@-2 {{argument 'bravo' must precede argument 'charlie'}}
+    f21(charlie: 0, alpha: 1, bravox: 2) // expected-error {{argument 'alpha' must precede argument 'charlie'}}
+    // expected-error@-1 {{argument 'bravox' must precede argument 'charlie'}}
+    // expected-error@-2 {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
+    f21(charliex: 0, alpha: 1, bravo: 2) // expected-error {{argument 'alpha' must precede argument 'charliex'}}
+    // expected-error@-1 {{argument 'bravo' must precede argument 'charliex'}} {{9-9=bravo: 2, }}
+    // expected-error@-2 {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
+    f22(charlie: 0, alphax: 1, bravo: 2) // expected-error {{incorrect argument label in call (have 'alphax:', expected 'alpha:')}}
+    // expected-error@-1 {{argument 'alphax' must precede argument 'charlie'}}
+    // expected-error@-2 {{argument 'bravo' must precede argument 'charlie'}}
+    f22(charlie: 0, alpha: 1, bravox: 2) // expected-error {{argument 'alpha' must precede argument 'charlie'}}
+    // expected-error@-1 {{argument 'bravox' must precede argument 'charlie'}} {{9-9=bravox: 2, }}
+    // expected-error@-2 {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
+    f22(charliex: 0, alpha: 1, bravo: 2) // expected-error {{argument 'alpha' must precede argument 'charliex'}}
+    // expected-error@-1 {{argument 'bravo' must precede argument 'charliex'}}
+    // expected-error@-2 {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
+    f23(charlie: 0, alphax: 1, bravo: 2) // expected-error {{incorrect argument label in call (have 'alphax:', expected 'alpha:')}}
+    // expected-error@-1 {{argument 'alphax' must precede argument 'charlie'}}
+    // expected-error@-2 {{argument 'bravo' must precede argument 'charlie'}}
     f23(charlie: 0, alpha: 1, bravox: 2) // expected-error {{argument 'alpha' must precede argument 'charlie'}}
-    f23(charliex: 0, alpha: 1, bravo: 2) // expected-error {{incorrect argument labels in call (have 'charliex:alpha:bravo:', expected 'alpha:bravo:charlie:')}}
+    // expected-error@-1 {{argument 'bravox' must precede argument 'charlie'}}
+    // expected-error@-2 {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
+    f23(charliex: 0, alpha: 1, bravo: 2) // expected-error {{argument 'alpha' must precede argument 'charliex'}}
+    // expected-error@-1 {{argument 'bravo' must precede argument 'charliex'}}
+    // expected-error@-2 {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
   }
 
   func f31(alpha: Int, bravo: Int, charlie: Int, delta: Int) {}
@@ -697,32 +769,56 @@ struct OutOfOrderAndDefault {
 
   func test3() {
     // BACD
-    f31(bravo: 0, alphax: 2, charlie: 2, delta: 3) // expected-error {{incorrect argument labels in call (have 'bravo:alphax:charlie:delta:', expected 'alpha:bravo:charlie:delta:')}}
-    f31(bravox: 0, alpha: 2, charlie: 2, delta: 3) // expected-error {{incorrect argument labels in call (have 'bravox:alpha:charlie:delta:', expected 'alpha:bravo:charlie:delta:')}}
+    f31(bravo: 0, alphax: 2, charlie: 2, delta: 3) // expected-error {{incorrect argument label in call (have 'alphax:', expected 'alpha:')}}
+    // expected-error@-1 {{argument 'alphax' must precede argument 'bravo'}}
+    f31(bravox: 0, alpha: 2, charlie: 2, delta: 3) // expected-error {{argument 'alpha' must precede argument 'bravox'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
     f31(bravo: 0, alpha: 2, charliex: 2, delta: 3) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
     f31(bravo: 0, alpha: 2, charlie: 2, deltax: 3) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
-    f32(bravo: 0, alphax: 2, charlie: 2, delta: 3) // expected-error {{incorrect argument labels in call (have 'bravo:alphax:charlie:delta:', expected 'alpha:bravo:charlie:delta:')}}
-    f32(bravox: 0, alpha: 2, charlie: 2, delta: 3) // expected-error {{incorrect argument labels in call (have 'bravox:alpha:charlie:delta:', expected 'alpha:bravo:charlie:delta:')}}
+    // expected-error@-1 {{incorrect argument label in call (have 'deltax:', expected 'delta:')}}
+    f32(bravo: 0, alphax: 2, charlie: 2, delta: 3) // expected-error {{incorrect argument label in call (have 'alphax:', expected 'alpha:')}}
+    // expected-error@-1 {{argument 'alphax' must precede argument 'bravo'}}
+    f32(bravox: 0, alpha: 2, charlie: 2, delta: 3) // expected-error {{argument 'alpha' must precede argument 'bravox'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
     f32(bravo: 0, alpha: 2, charliex: 2, delta: 3) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
     f32(bravo: 0, alpha: 2, charlie: 2, deltax: 3) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
-    f33(bravo: 0, alphax: 2, charlie: 2, delta: 3) // expected-error {{incorrect argument labels in call (have 'bravo:alphax:charlie:delta:', expected 'alpha:bravo:charlie:delta:')}}
-    f33(bravox: 0, alpha: 2, charlie: 2, delta: 3) // expected-error {{incorrect argument labels in call (have 'bravox:alpha:charlie:delta:', expected 'alpha:bravo:charlie:delta:')}}
+    // expected-error@-1 {{incorrect argument label in call (have 'deltax:', expected 'delta:')}}
+    f33(bravo: 0, alphax: 2, charlie: 2, delta: 3) // expected-error {{incorrect argument label in call (have 'alphax:', expected 'alpha:')}}
+    // expected-error@-1 {{argument 'alphax' must precede argument 'bravo'}}
+    f33(bravox: 0, alpha: 2, charlie: 2, delta: 3) // expected-error {{argument 'alpha' must precede argument 'bravox'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
     f33(bravo: 0, alpha: 2, charliex: 2, delta: 3) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
     f33(bravo: 0, alpha: 2, charlie: 2, deltax: 3) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'deltax:', expected 'delta:')}}
 
     // BCAD
-    f31(bravo: 0, charlie: 1, alphax: 2, delta: 3) // expected-error {{incorrect argument labels in call (have 'bravo:charlie:alphax:delta:', expected 'alpha:bravo:charlie:delta:')}}
-    f31(bravox: 0, charlie: 1, alpha: 2, delta: 3) // expected-error {{incorrect argument labels in call (have 'bravox:charlie:alpha:delta:', expected 'alpha:bravo:charlie:delta:')}}
+    f31(bravo: 0, charlie: 1, alphax: 2, delta: 3) // expected-error {{incorrect argument label in call (have 'alphax:', expected 'alpha:')}}
+    // expected-error@-1 {{argument 'alphax' must precede argument 'bravo'}}
+    f31(bravox: 0, charlie: 1, alpha: 2, delta: 3) // expected-error {{argument 'alpha' must precede argument 'bravox'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
     f31(bravo: 0, charliex: 1, alpha: 2, delta: 3) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
     f31(bravo: 0, charlie: 1, alpha: 2, deltax: 3) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
-    f32(bravo: 0, charlie: 1, alphax: 2, delta: 3) // expected-error {{incorrect argument labels in call (have 'bravo:charlie:alphax:delta:', expected 'alpha:bravo:charlie:delta:')}}
-    f32(bravox: 0, charlie: 1, alpha: 2, delta: 3) // expected-error {{incorrect argument labels in call (have 'bravox:charlie:alpha:delta:', expected 'alpha:bravo:charlie:delta:')}}
+    // expected-error@-1 {{incorrect argument label in call (have 'deltax:', expected 'delta:')}}
+    f32(bravo: 0, charlie: 1, alphax: 2, delta: 3) // expected-error {{incorrect argument label in call (have 'alphax:', expected 'alpha:')}}
+    // expected-error@-1 {{argument 'alphax' must precede argument 'bravo'}}
+    f32(bravox: 0, charlie: 1, alpha: 2, delta: 3) // expected-error {{argument 'alpha' must precede argument 'bravox'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
     f32(bravo: 0, charliex: 1, alpha: 2, delta: 3) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
     f32(bravo: 0, charlie: 1, alpha: 2, deltax: 3) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
-    f33(bravo: 0, charlie: 1, alphax: 2, delta: 3) // expected-error {{incorrect argument labels in call (have 'bravo:charlie:alphax:delta:', expected 'alpha:bravo:charlie:delta:')}}
-    f33(bravox: 0, charlie: 1, alpha: 2, delta: 3) // expected-error {{incorrect argument labels in call (have 'bravox:charlie:alpha:delta:', expected 'alpha:bravo:charlie:delta:')}}
+    // expected-error@-1 {{incorrect argument label in call (have 'deltax:', expected 'delta:')}}
+    f33(bravo: 0, charlie: 1, alphax: 2, delta: 3) // expected-error {{incorrect argument label in call (have 'alphax:', expected 'alpha:')}}
+    // expected-error@-1 {{argument 'alphax' must precede argument 'bravo'}}
+    f33(bravox: 0, charlie: 1, alpha: 2, delta: 3) // expected-error {{argument 'alpha' must precede argument 'bravox'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'bravox:', expected 'bravo:')}}
     f33(bravo: 0, charliex: 1, alpha: 2, delta: 3) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'charliex:', expected 'charlie:')}}
     f33(bravo: 0, charlie: 1, alpha: 2, deltax: 3) // expected-error {{argument 'alpha' must precede argument 'bravo'}}
+    // expected-error@-1 {{incorrect argument label in call (have 'deltax:', expected 'delta:')}}
   }
 }
 

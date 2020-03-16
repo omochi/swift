@@ -679,11 +679,49 @@ RemoveExtraneousArguments *RemoveExtraneousArguments::create(
       RemoveExtraneousArguments(cs, contextualType, extraArgs, locator);
 }
 
+RelabelSingleArgument *
+RelabelSingleArgument::create(ConstraintSystem &cs, unsigned argIdx,
+                              Identifier correctLabel,
+                              ConstraintLocator *locator) {
+  return new (cs.getAllocator())
+      RelabelSingleArgument(cs, argIdx, correctLabel, locator);
+}
+
+bool RelabelSingleArgument::diagnose(const Solution &solution,
+                                     bool asNote) const {
+  SingleLabelingFailure failure(solution, ArgIdx, CorrectLabel, getLocator());
+  return failure.diagnose(asNote);
+}
+
+bool RelabelSingleArgument::coalesceAndDiagnose(
+    const Solution &solution, ArrayRef<ConstraintFix *> secondaryFixes,
+    bool asNote) const {
+  bool did = diagnose(solution, asNote);
+  for (auto sfix : secondaryFixes) {
+    if (auto fix = sfix->getAs<RelabelSingleArgument>()) {
+      did = fix->diagnose(solution, asNote) || did;
+    }
+  }
+  return did;
+}
+
 bool MoveOutOfOrderArgument::diagnose(const Solution &solution,
                                       bool asNote) const {
   OutOfOrderArgumentFailure failure(solution, ArgIdx, PrevArgIdx, Bindings,
                                     getLocator());
   return failure.diagnose(asNote);
+}
+
+bool MoveOutOfOrderArgument::coalesceAndDiagnose(
+    const Solution &solution, ArrayRef<ConstraintFix *> secondaryFixes,
+    bool asNote) const {
+  bool did = diagnose(solution, asNote);
+  for (auto sfix : secondaryFixes) {
+    if (auto fix = sfix->getAs<MoveOutOfOrderArgument>()) {
+      did = fix->diagnose(solution, asNote) || did;
+    }
+  }
+  return did;
 }
 
 MoveOutOfOrderArgument *MoveOutOfOrderArgument::create(

@@ -7,7 +7,10 @@ struct S: _ExpressibleByColorLiteral {
 
 let y: S = #colorLiteral(red: 1, green: 0, blue: 0, alpha: 1)
 let y2 = #colorLiteral(red: 1, green: 0, blue: 0, alpha: 1) // expected-error{{could not infer type of color literal}} expected-note{{import AppKit to use 'NSColor' as the default color literal type}}
-let y3 = #colorLiteral(red: 1, bleen: 0, grue: 0, alpha: 1) // expected-error{{incorrect argument labels in call (have 'red:bleen:grue:alpha:', expected 'red:green:blue:alpha:')}} expected-error{{could not infer type of color literal}} expected-note{{import AppKit to use 'NSColor' as the default color literal type}}
+let y3 = #colorLiteral(red: 1, bleen: 0, grue: 0, alpha: 1) // expected-error {{incorrect argument label in call (have 'grue:', expected 'blue:')}} 
+// expected-error@-1 {{incorrect argument label in call (have 'bleen:', expected 'green:')}}
+// expected-error@-2 {{could not infer type of color literal}} 
+// expected-note@-3 {{import AppKit to use 'NSColor' as the default color literal type}}
 
 struct I: _ExpressibleByImageLiteral {
   init(imageLiteralResourceName: String) {}
