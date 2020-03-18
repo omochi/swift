@@ -651,7 +651,6 @@ matchCallArguments(SmallVectorImpl<AnyFunctionType::Param> &args,
     const auto bindings = ArgumentBindingHelper::fromParameterBindings(
         parameterBindings, numArgs);
 
-    bool hadIssue = false;
     for (const auto paramIdx : indices(params)) {
       const auto bindIdx = bindings.paramToBinding[paramIdx];
       if (!bindIdx)
@@ -664,7 +663,6 @@ matchCallArguments(SmallVectorImpl<AnyFunctionType::Param> &args,
       // check label mismatch
       if (!isTrailingClosureArgument(binding.argIdx) &&
           paramLabel != argLabel) {
-        hadIssue = true;
         if (argLabel.empty()) {
           if (listener.missingLabel(binding.paramIdx))
             return true;
@@ -684,7 +682,6 @@ matchCallArguments(SmallVectorImpl<AnyFunctionType::Param> &args,
           continue;
         const auto &leftBinding = bindings.bindings[*leftBindIdx];
         if (paramIdx <= leftBinding.paramIdx) {
-          hadIssue = true;
           if (listener.outOfOrderArgument(binding.argIdx, leftArgIdx))
             return true;
           break;
@@ -797,16 +794,7 @@ public:
         CS.increaseScore(SK_Fix);
         return false;
       }
-
-      Optional<unsigned> paramIdx;
-      for (auto i : indices(Bindings)) {
-        const auto Binding = Bindings[i];
-        if (Binding.size() > 0 && Binding[0] == argIdx) {
-          paramIdx = i;
-          break;
-        }
-      }
-
+      
       auto *fix = MoveOutOfOrderArgument::create(
           CS, argIdx, prevArgIdx, Bindings, CS.getConstraintLocator(Locator));
       return CS.recordFix(fix);
