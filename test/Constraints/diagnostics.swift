@@ -851,7 +851,6 @@ func nilComparison(i: Int, o: AnyObject) {
 func secondArgumentNotLabeled(a: Int, _ b: Int) { }
 secondArgumentNotLabeled(10, 20)
 // expected-error@-1 {{missing argument label 'a:' in call}}
-// expected-error@-2 {{unnamed argument #2 must precede unnamed argument #1}}
 
 // <rdar://problem/23709100> QoI: incorrect ambiguity error due to implicit conversion
 func testImplConversion(a : Float?) -> Bool {}
@@ -947,24 +946,21 @@ func r27212391(x: Int, _ y: Int) {
 }
 
 func r27212391(a: Int, x: Int, _ y: Int) {
-  // expected-note@-1 {{candidate has partially matching parameter list (a: Int, x: Int, Int)}}
+  // expected-note@-1 {{incorrect labels for candidate (have: '_:x:y:', expected: 'a:x:_:')}}
+  // expected-note@-2 {{'r27212391(a:x:_:)' declared here}}
   let _: Int = a + x + y
 }
 
 r27212391(3, 5)             // expected-error {{missing argument label 'x:' in call}}
-// expected-error@-1 {{unnamed argument #2 must precede unnamed argument #1}}
-r27212391(3, y: 5)          // expected-error {{incorrect argument label in call (have 'y:', expected 'x:')}}
-// expected-error@-1 {{argument 'y' must precede unnamed argument #1}}
+r27212391(3, y: 5)          // expected-error {{incorrect argument labels in call (have '_:y:', expected 'x:_:')}}
 r27212391(3, x: 5)          // expected-error {{argument 'x' must precede unnamed argument #1}} {{11-11=x: 5, }} {{12-18=}}
-r27212391(y: 3, x: 5)       // expected-error {{argument 'x' must precede argument 'y'}}
-// expected-error@-1 {{extraneous argument label 'y:' in call}}
+r27212391(y: 3, x: 5)       // expected-error {{incorrect argument label in call (have 'y:', expected 'a:')}}
+// expected-error@-1 {{missing argument for parameter #3 in call}}
 r27212391(y: 3, 5)          // expected-error {{incorrect argument label in call (have 'y:', expected 'x:')}}
 r27212391(x: 3, x: 5)       // expected-error {{extraneous argument label 'x:' in call}}
-r27212391(a: 1, 3, y: 5)    // expected-error {{incorrect argument label in call (have 'y:', expected 'x:')}}
-// expected-error@-1 {{argument 'y' must precede unnamed argument #2}}
+r27212391(a: 1, 3, y: 5)    // expected-error {{incorrect argument labels in call (have 'a:_:y:', expected 'a:x:_:')}}
 r27212391(1, x: 3, y: 5)    // expected-error {{no exact matches in call to global function 'r27212391'}}
-r27212391(a: 1, y: 3, x: 5) // expected-error {{argument 'x' must precede argument 'y'}}
-// expected-error@-1 {{extraneous argument label 'y:' in call}}
+r27212391(a: 1, y: 3, x: 5) // expected-error {{extra argument 'y' in call}}
 r27212391(a: 1, 3, x: 5)    // expected-error {{argument 'x' must precede unnamed argument #2}} {{17-17=x: 5, }} {{18-24=}}
 
 // SR-1255
@@ -1251,9 +1247,7 @@ fun_31849281(a: { !$0 }, c: [nil, 42], b: { "\($0)" })
 // expected-error@-1 {{argument 'b' must precede argument 'c'}} {{26-26=b: { "\\($0)" }, }} {{38-54=}}
 
 func f_31849281(x: Int, y: Int, z: Int) {}
-f_31849281(42, y: 10, x: 20) // expected-error {{argument 'x' must precede unnamed argument #1}}  {{12-12=x: 20, }} {{21-28=}}
-// expected-error@-1 {{missing argument label 'z:' in call}} {{12-12=z: }}
-// expected-error@-2 {{argument 'y' must precede unnamed argument #1}} {{12-12=y: 10, }} {{14-21=}}
+f_31849281(42, y: 10, x: 20) // expected-error {{incorrect argument labels in call (have '_:y:x:', expected 'x:y:z:')}} {{12-12=x: }} {{23-24=z}}
 
 func sr5081() {
   var a = ["1", "2", "3", "4", "5"]

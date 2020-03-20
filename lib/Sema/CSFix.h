@@ -165,10 +165,6 @@ enum class FixKind : uint8_t {
   /// Allow single tuple closure parameter destructuring into N arguments.
   AllowClosureParameterDestructuring,
 
-  /// A single argument have labeling failure - missing/extraneous or incorrect
-  /// label attached to the, fix it by suggesting proper label.
-  RelabelSingleArgument,
-
   /// If there is out-of-order argument, let's fix that by re-ordering.
   MoveOutOfOrderArgument,
 
@@ -351,41 +347,35 @@ public:
                                      ConstraintLocator *locator);
 };
 
+struct ArgumentRelabelingItem {
+  // None is missing argument
+  Optional<Identifier> argLabel;
+  SourceLoc argLabelLoc;
+  SourceLoc argLoc;
+  // None is extra argument
+  Optional<Identifier> paramLabel;
+};
+using ArgumentRelabeling = SmallVector<ArgumentRelabelingItem, 4>;
+
 /// Arguments have labeling failures - missing/extraneous or incorrect
 /// labels attached to the, fix it by suggesting proper labels.
-class RelabelArguments final
-    : public ConstraintFix,
-      private llvm::TrailingObjects<RelabelArguments, Identifier> {
-  friend TrailingObjects;
+class RelabelArguments final : public ConstraintFix {
+  ArgumentRelabeling Relabeling;
+  bool IsSubscript;
 
-  unsigned NumLabels;
-
-  RelabelArguments(ConstraintSystem &cs,
-                   llvm::ArrayRef<Identifier> correctLabels,
-                   ConstraintLocator *locator)
+  RelabelArguments(ConstraintSystem &cs, const ArgumentRelabeling &relabeling,
+                   bool isSubscript, ConstraintLocator *locator)
       : ConstraintFix(cs, FixKind::RelabelArguments, locator),
-        NumLabels(correctLabels.size()) {
-    std::uninitialized_copy(correctLabels.begin(), correctLabels.end(),
-                            getLabelsBuffer().begin());
-  }
+        Relabeling(relabeling), IsSubscript(isSubscript) {}
 
 public:
   std::string getName() const override { return "re-label argument(s)"; }
 
-  ArrayRef<Identifier> getLabels() const {
-    return {getTrailingObjects<Identifier>(), NumLabels};
-  }
-
   bool diagnose(const Solution &solution, bool asNote = false) const override;
 
   static RelabelArguments *create(ConstraintSystem &cs,
-                                  llvm::ArrayRef<Identifier> correctLabels,
-                                  ConstraintLocator *locator);
-
-private:
-  MutableArrayRef<Identifier> getLabelsBuffer() {
-    return {getTrailingObjects<Identifier>(), NumLabels};
-  }
+                                  const ArgumentRelabeling &relabeling,
+                                  bool isSubscript, ConstraintLocator *locator);
 };
 
 /// Add a new conformance to the type to satisfy a requirement.
@@ -1188,33 +1178,6 @@ private:
   }
 };
 
-class RelabelSingleArgument final : public ConstraintFix {
-  unsigned ArgIdx;
-  Identifier CorrectLabel;
-
-  RelabelSingleArgument(ConstraintSystem &cs, unsigned argIdx,
-                        Identifier correctLabel, ConstraintLocator *locator)
-      : ConstraintFix(cs, FixKind::RelabelSingleArgument, locator),
-        ArgIdx(argIdx), CorrectLabel(correctLabel) {}
-
-public:
-  static bool classof(const ConstraintFix *fix) {
-    return fix->getKind() == FixKind::RelabelSingleArgument;
-  }
-
-  std::string getName() const override { return "relabel an argument"; }
-
-  bool diagnose(const Solution &solution, bool asNote = false) const override;
-
-  bool coalesceAndDiagnose(const Solution &solution,
-                           ArrayRef<ConstraintFix *> secondaryFixes,
-                           bool asNote = false) const override;
-
-  static RelabelSingleArgument *create(ConstraintSystem &cs, unsigned argIdx,
-                                       Identifier correctLabel,
-                                       ConstraintLocator *locator);
-};
-
 class MoveOutOfOrderArgument final : public ConstraintFix {
   using ParamBinding = SmallVector<unsigned, 1>;
 
@@ -1240,10 +1203,6 @@ public:
   }
 
   bool diagnose(const Solution &solution, bool asNote = false) const override;
-
-  bool coalesceAndDiagnose(const Solution &solution,
-                           ArrayRef<ConstraintFix *> secondaryFixes,
-                           bool asNote = false) const override;
 
   static MoveOutOfOrderArgument *create(ConstraintSystem &cs,
                                         unsigned argIdx,

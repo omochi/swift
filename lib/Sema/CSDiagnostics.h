@@ -465,15 +465,20 @@ protected:
 /// Call to `foo` is going to be diagnosed as missing `q:`
 /// and having extraneous `a:` labels, with appropriate fix-its added.
 class LabelingFailure final : public FailureDiagnostic {
-  ArrayRef<Identifier> CorrectLabels;
+  ArgumentRelabeling Relabeling;
+  bool IsSubscript;
 
 public:
   LabelingFailure(const Solution &solution, ConstraintLocator *locator,
-                  ArrayRef<Identifier> labels)
-      : FailureDiagnostic(solution, locator), CorrectLabels(labels) {}
+                  const ArgumentRelabeling &relabeling, bool isSubscript)
+      : FailureDiagnostic(solution, locator), Relabeling(relabeling),
+        IsSubscript(isSubscript) {}
 
   bool diagnoseAsError() override;
   bool diagnoseAsNote() override;
+
+private:
+  bool diagnoseAsError(bool asNote);
 };
 
 /// Diagnose failures related to attempting member access on optional base
@@ -1310,20 +1315,6 @@ private:
     return locator->isLastElement<LocatorPathElt::ContextualType>() ||
            locator->isLastElement<LocatorPathElt::ApplyArgToParam>();
   }
-};
-
-class SingleLabelingFailure final : public FailureDiagnostic {
-  unsigned ArgIdx;
-  Identifier CorrectLabel;
-
-public:
-  SingleLabelingFailure(const Solution &solution, unsigned argIdx,
-                        Identifier correctLabel, ConstraintLocator *locator)
-      : FailureDiagnostic(solution, locator), ArgIdx(argIdx),
-        CorrectLabel(correctLabel) {}
-
-  bool diagnoseAsError() override;
-  bool diagnoseAsNote() override;
 };
 
 class OutOfOrderArgumentFailure final : public FailureDiagnostic {

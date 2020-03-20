@@ -55,6 +55,12 @@ bool MatchCallArgumentListener::outOfOrderArgument(unsigned argIdx,
   return true;
 }
 
+bool MatchCallArgumentListener::relabelArguments(
+    ArrayRef<Optional<unsigned>> argIdxs,
+    ArrayRef<Optional<unsigned>> paramIdxs, unsigned numOutOfOrder) {
+  return true;
+}
+
 bool MatchCallArgumentListener::trailingClosureMismatch(
     unsigned paramIdx, unsigned argIdx) {
   return true;
@@ -206,31 +212,6 @@ static bool acceptsTrailingClosure(const AnyFunctionType::Param &param) {
       paramTy->isTypeVariableOrMember() ||
       paramTy->is<UnresolvedType>() ||
       paramTy->isAny();
-}
-
-ArgumentBindingHelper ArgumentBindingHelper::fromParameterBindings(
-    const SmallVectorImpl<ParamBinding> &parameterBindings, unsigned numArgs) {
-  auto result = ArgumentBindingHelper();
-  result.paramToBinding.resize(parameterBindings.size());
-  result.argToBinding.resize(numArgs);
-  for (const auto paramIdx : indices(parameterBindings)) {
-    const auto &parameterBinding = parameterBindings[paramIdx];
-
-    // missing argument parameter
-    if (parameterBinding.empty())
-      continue;
-
-    const auto argIdx = parameterBinding[0];
-    // extra argument
-    if (numArgs <= argIdx)
-      continue;
-
-    const auto bindIdx = result.bindings.size();
-    result.bindings.push_back(Binding(paramIdx, argIdx));
-    result.paramToBinding[paramIdx] = bindIdx;
-    result.argToBinding[argIdx] = bindIdx;
-  }
-  return result;
 }
 
 // FIXME: This should return ConstraintSystem::TypeMatchResult instead
@@ -648,43 +629,160 @@ matchCallArguments(SmallVectorImpl<AnyFunctionType::Param> &args,
       return hasTrailingClosure && argIdx == numArgs - 1;
     };
 
-    const auto bindings = ArgumentBindingHelper::fromParameterBindings(
-        parameterBindings, numArgs);
+    // Pick arguments mapped to some parameter.
+    SmallVector<Optional<unsigned>, 4> argBindings(args.size());
+    for (auto paramIdx : indices(params)) {
+      const auto &bindings = parameterBindings[paramIdx];
+      if (bindings.empty())
+        continue;
+      const auto argIdx = bindings.front();
+      // Skip synthesized argument for missing argument
+      if (argIdx >= numArgs)
+        continue;
+      argBindings[argIdx] = paramIdx;
+    }
+
+    SmallVector<bool, 4> labelFailedArgs(args.size());
+    unsigned numLabelMissing = 0;
+    unsigned numLabelExtra = 0;
+    unsigned numLabelWrong = 0;
+    SmallVector<Optional<unsigned>, 4> outOfOrderArgs(args.size());
+    unsigned numOutOfOrder = 0;
 
     for (const auto paramIdx : indices(params)) {
-      const auto bindIdx = bindings.paramToBinding[paramIdx];
-      if (!bindIdx)
+      if (parameterBindings[paramIdx].empty())
         continue;
-      const auto &binding = bindings.bindings[*bindIdx];
+      const auto argIdx = parameterBindings[paramIdx].front();
+      if (argIdx >= numArgs)
+        continue;
 
-      const auto paramLabel = params[binding.paramIdx].getLabel();
-      const auto argLabel = args[binding.argIdx].getLabel();
+      const auto paramLabel = params[paramIdx].getLabel();
+      const auto argLabel = args[argIdx].getLabel();
 
       // check label mismatch
-      if (!isTrailingClosureArgument(binding.argIdx) &&
-          paramLabel != argLabel) {
+      if (!isTrailingClosureArgument(argIdx) && paramLabel != argLabel) {
+        labelFailedArgs[argIdx] = true;
         if (argLabel.empty()) {
-          if (listener.missingLabel(binding.paramIdx))
-            return true;
+          numLabelMissing++;
         } else if (paramLabel.empty()) {
-          if (listener.extraneousLabel(binding.paramIdx))
-            return true;
+          numLabelExtra++;
         } else {
-          if (listener.incorrectLabel(binding.paramIdx))
-            return true;
+          numLabelWrong++;
         }
       }
 
       // check out of order
-      for (unsigned leftArgIdx = 0; leftArgIdx < binding.argIdx; leftArgIdx++) {
-        const auto leftBindIdx = bindings.argToBinding[leftArgIdx];
-        if (!leftBindIdx)
+      for (unsigned leftArgIdx = 0; leftArgIdx < argIdx; leftArgIdx++) {
+        auto leftParamIdx = argBindings[leftArgIdx];
+        if (!leftParamIdx)
           continue;
-        const auto &leftBinding = bindings.bindings[*leftBindIdx];
-        if (paramIdx <= leftBinding.paramIdx) {
-          if (listener.outOfOrderArgument(binding.argIdx, leftArgIdx))
-            return true;
+        if (paramIdx <= *leftParamIdx) {
+          outOfOrderArgs[argIdx] = leftArgIdx;
+          numOutOfOrder++;
           break;
+        }
+      }
+    }
+
+    bool doesAggregatesDiagnostics = false;
+
+    // If reordering source or destination have labeling failure,
+    // diagnostic message would be confusing.
+    // In this case, fallback to aggregated diagnostics.
+    if (numOutOfOrder > 0) {
+      for (auto argIdx : indices(args)) {
+        auto leftArgIdx = outOfOrderArgs[argIdx];
+        if (!leftArgIdx)
+          continue;
+        if (labelFailedArgs[argIdx] || labelFailedArgs[*leftArgIdx]) {
+          doesAggregatesDiagnostics = true;
+          break;
+        }
+      }
+    }
+
+    // If all multiple labeling failures have same category,
+    // aggregates diagnostics
+    if (!doesAggregatesDiagnostics && numOutOfOrder == 0) {
+      if ((numLabelMissing > 1 && numLabelExtra == 0 && numLabelWrong == 0) ||
+          (numLabelMissing == 0 && numLabelExtra > 1 && numLabelWrong == 0) ||
+          (numLabelMissing == 0 && numLabelExtra == 0 && numLabelWrong > 1)) {
+        doesAggregatesDiagnostics = true;
+      }
+    }
+
+    if (doesAggregatesDiagnostics) {
+      SmallVector<Optional<unsigned>, 4> argIdxs;
+      SmallVector<Optional<unsigned>, 4> paramIdxs;
+
+      unsigned argIdx = 0;
+      unsigned paramIdx = 0;
+      while (argIdx < numArgs) {
+        if (!argBindings[argIdx]) {
+          if (!claimedArgs[argIdx]) {
+            // extra argument
+            argIdxs.push_back(argIdx);
+            paramIdxs.push_back(None);
+          } else {
+            // skip variadic tail
+          }
+          argIdx++;
+          continue;
+        }
+
+        for (; paramIdx < params.size(); paramIdx++) {
+          if (!parameterBindings[paramIdx].empty())
+            break;
+
+          if (params[paramIdx].isVariadic() ||
+              paramInfo.hasDefaultArgument(paramIdx))
+            continue;
+
+          // missing argument
+          argIdxs.push_back(None);
+          paramIdxs.push_back(paramIdx);
+        }
+
+        argIdxs.push_back(argIdx);
+        paramIdxs.push_back(paramIdx);
+        argIdx++;
+        paramIdx++;
+      }
+      for (; paramIdx < params.size(); paramIdx++) {
+        if (params[paramIdx].isVariadic() ||
+            paramInfo.hasDefaultArgument(paramIdx))
+          continue;
+
+        // missing argumnet
+        argIdxs.push_back(None);
+        paramIdxs.push_back(paramIdx);
+      }
+
+      if (listener.relabelArguments(argIdxs, paramIdxs, numOutOfOrder))
+        return true;
+    } else {
+      for (auto paramIdx : indices(params)) {
+        if (parameterBindings[paramIdx].empty())
+          continue;
+        auto argIdx = parameterBindings[paramIdx].front();
+        if (labelFailedArgs[argIdx]) {
+          const auto argLabel = args[argIdx].getLabel();
+          const auto paramLabel = params[paramIdx].getLabel();
+          if (argLabel.empty()) {
+            if (listener.missingLabel(paramIdx))
+              return true;
+          } else if (paramLabel.empty()) {
+            if (listener.extraneousLabel(paramIdx))
+              return true;
+          } else {
+            if (listener.incorrectLabel(paramIdx))
+              return true;
+          }
+        }
+        auto leftArgIdx = outOfOrderArgs[argIdx];
+        if (leftArgIdx) {
+          if (listener.outOfOrderArgument(argIdx, *leftArgIdx))
+            return true;
         }
       }
     }
@@ -753,7 +851,7 @@ public:
     return false;
   }
 
-  bool incorrectLabel(unsigned paramIndex, unsigned impact) {
+  bool incorrectLabel(unsigned paramIdx, unsigned impact) {
     if (!CS.shouldAttemptFixes())
       return true;
 
@@ -766,9 +864,41 @@ public:
       return false;
     }
 
-    auto *fix = RelabelSingleArgument::create(CS, Bindings[paramIndex].front(),
-                                              Parameters[paramIndex].getLabel(),
-                                              CS.getConstraintLocator(Locator));
+    auto *locator = CS.getConstraintLocator(Locator);
+
+    Expr *callExpr = locator->getAnchor();
+    if (!callExpr)
+      return true;
+
+    auto locatorExpr = simplifyLocatorToAnchor(locator);
+    TupleExpr *tupleExpr = dyn_cast<TupleExpr>(locatorExpr);
+    ParenExpr *parenExpr = dyn_cast<ParenExpr>(locatorExpr);
+    if (!tupleExpr && !parenExpr)
+      return true;
+
+    auto argIdx = Bindings[paramIdx].front();
+
+    ArgumentRelabelingItem item;
+    const auto argLabel = Arguments[argIdx].getLabel();
+    item.argLabel = argLabel;
+    if (tupleExpr) {
+      item.argLabelLoc = tupleExpr->getElementNameLoc(argIdx);
+      item.argLoc = tupleExpr->getElement(argIdx)->getLoc();
+    }
+    if (parenExpr) {
+      item.argLoc = parenExpr->getSubExpr()->getLoc();
+    }
+    const auto paramLabel = Parameters[paramIdx].getLabel();
+    item.paramLabel = paramLabel;
+
+    ArgumentRelabeling relabeling;
+    relabeling.push_back(item);
+
+    auto *labelLocator =
+        CS.getConstraintLocator(locator, LocatorPathElt::ArgumentLabel(argIdx));
+
+    auto *fix = RelabelArguments::create(
+        CS, relabeling, isa<SubscriptExpr>(callExpr), labelLocator);
     return CS.recordFix(fix, impact);
   }
 
@@ -794,13 +924,99 @@ public:
         CS.increaseScore(SK_Fix);
         return false;
       }
-      
-      auto *fix = MoveOutOfOrderArgument::create(
-          CS, argIdx, prevArgIdx, Bindings, CS.getConstraintLocator(Locator));
+
+      auto *labelLocator = CS.getConstraintLocator(
+          Locator.withPathElement(LocatorPathElt::ArgumentLabel(argIdx)));
+
+      auto *fix = MoveOutOfOrderArgument::create(CS, argIdx, prevArgIdx,
+                                                 Bindings, labelLocator);
       return CS.recordFix(fix);
     }
 
     return true;
+  }
+
+  bool relabelArguments(ArrayRef<Optional<unsigned>> argIdxs,
+                        ArrayRef<Optional<unsigned>> paramIdxs,
+                        unsigned numOutOfOrder) override {
+    if (!CS.shouldAttemptFixes())
+      return true;
+
+    // TODO(diagnostics): If re-labeling is mixed with extra arguments,
+    // let's produce a fix only for extraneous arguments for now,
+    // because they'd share a locator path which (currently) means
+    // one fix would overwrite another.
+    if (!ExtraArguments.empty()) {
+      CS.increaseScore(SK_Fix);
+      return false;
+    }
+
+    auto *locator = CS.getConstraintLocator(Locator);
+
+    Expr *callExpr = locator->getAnchor();
+    if (!callExpr)
+      return true;
+    auto locatorExpr = simplifyLocatorToAnchor(locator);
+    TupleExpr *tupleExpr = dyn_cast<TupleExpr>(locatorExpr);
+    ParenExpr *parenExpr = dyn_cast<ParenExpr>(locatorExpr);
+    if (!tupleExpr && !parenExpr)
+      return true;
+
+    unsigned numMissing = 0;
+    unsigned numExtra = 0;
+    unsigned numWrong = 0;
+
+    ArgumentRelabeling relabeling;
+    for (auto i : indices(argIdxs)) {
+      auto argIdx = argIdxs[i];
+      auto paramIdx = paramIdxs[i];
+
+      ArgumentRelabelingItem item;
+
+      if (argIdx) {
+        const auto argLabel = Arguments[*argIdx].getLabel();
+        item.argLabel = argLabel;
+        if (tupleExpr) {
+          item.argLabelLoc = tupleExpr->getElementNameLoc(*argIdx);
+          item.argLoc = tupleExpr->getElement(*argIdx)->getLoc();
+        }
+        if (parenExpr) {
+          item.argLoc = parenExpr->getSubExpr()->getLoc();
+        }
+      }
+
+      if (paramIdx) {
+        const auto paramLabel = Parameters[*paramIdx].getLabel();
+        item.paramLabel = paramLabel;
+      }
+
+      relabeling.push_back(item);
+
+      if (argIdx && paramIdx) {
+        const auto argLabel = Arguments[*argIdx].getLabel();
+        const auto paramLabel = Parameters[*paramIdx].getLabel();
+
+        if (argLabel != paramLabel) {
+          if (argLabel.empty()) {
+            numMissing++;
+          } else if (paramLabel.empty()) {
+            numExtra++;
+          } else {
+            numWrong++;
+          }
+        }
+      }
+    }
+
+    auto *fix = RelabelArguments::create(CS, relabeling,
+                                         isa<SubscriptExpr>(callExpr), locator);
+
+    // Re-labeling fixes with extraneous/incorrect labels should be
+    // lower priority vs. other fixes on same/different overload(s)
+    // where labels did line up correctly.
+    unsigned impact = numMissing + numExtra * 3 + numWrong * 4 + numOutOfOrder;
+
+    return CS.recordFix(fix, impact);
   }
 
   bool trailingClosureMismatch(unsigned paramIdx, unsigned argIdx) override {
@@ -1766,11 +1982,17 @@ ConstraintSystem::matchFunctionTypes(FunctionType *func1, FunctionType *func2,
   }
 
   if (hasLabelingFailures) {
-    SmallVector<Identifier, 4> correctLabels;
-    for (const auto &param : func2Params)
-      correctLabels.push_back(param.getLabel());
+    // FIXME: This code doesn't work correctly.
+    // Previously `RelabelArguments` takes locator as source of arguments
+    // and pass it to `LabelingFailure` to diagnose.
+    // But `argumentLocator` is `DeclRef -> contextual type -> function
+    // argument` here. So `LabelingFailure::diagnoseAsError` failed
+    // `getArgumentListExprFor` and it didn't diagnose anything. When I change
+    // `RelabelArguments` to take `ArgumentRelabeling`, I passed empty
+    // relabeling to just keep behavior.
 
-    auto *fix = RelabelArguments::create(*this, correctLabels,
+    ArgumentRelabeling emptyRelabeling;
+    auto *fix = RelabelArguments::create(*this, emptyRelabeling, false,
                                          getConstraintLocator(argumentLocator));
     if (recordFix(fix))
       return getTypeMatchFailure(argumentLocator);
@@ -9113,7 +9335,6 @@ ConstraintSystem::SolutionKind ConstraintSystem::simplifyFixConstraint(
   case FixKind::RemoveReturn:
   case FixKind::RemoveAddressOf:
   case FixKind::AddMissingArguments:
-  case FixKind::RelabelSingleArgument:
   case FixKind::MoveOutOfOrderArgument:
   case FixKind::SkipUnhandledConstructInFunctionBuilder:
   case FixKind::UsePropertyWrapper:

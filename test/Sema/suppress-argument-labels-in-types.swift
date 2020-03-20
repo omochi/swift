@@ -207,13 +207,11 @@ let _ = min(Int(3), Float(2.5)) // expected-error{{conflicting arguments to gene
 
 // SR-11429
 func testIntermediateCoercions() {
-  _ = (f1 as (Int, Int) -> Int)(a: 0, b: 1) // expected-error {{extraneous argument label 'a:' in call}}
-  // expected-error@-1 {{extraneous argument label 'b:' in call}}
+  _ = (f1 as (Int, Int) -> Int)(a: 0, b: 1) // expected-error {{extraneous argument labels 'a:b:' in call}}
   _ = (f1 as (Int, Int) -> Int)(0, 1)
 
   typealias Magic<T> = T
-  _ = (f1 as Magic)(a: 0, b: 1) // expected-error {{extraneous argument label 'a:' in call}}
-  // expected-error@-1 {{extraneous argument label 'b:' in call}}
+  _ = (f1 as Magic)(a: 0, b: 1) // expected-error {{extraneous argument labels 'a:b:' in call}}
   _ = (f1 as Magic)(0, 1)
 
   _ = (f4 as (Int, Int) -> Int)(0, 0)

@@ -53,8 +53,7 @@ _ = bar(x: 1, y: 1)
 _ = bar.callAsFunction(x: 1, y: 1)
 _ = bar(x: bar.callAsFunction(x: 1, y: 1)[0], y: 1)
 _ = bar.callAsFunction(x: bar(x: 1, y: 1)[0], y: 1)
-_ = bar(1, 1) // expected-error {{missing argument label 'x:' in call}}
-// expected-error@-1 {{missing argument label 'y:' in call}}
+_ = bar(1, 1) // expected-error {{missing argument labels 'x:y:' in call}}
 
 struct Extended {}
 extension Extended {

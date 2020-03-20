@@ -101,8 +101,7 @@ func testMethods(_ i: Int, x: Y) {
   x.m2(i)(i, c: i) // expected-error{{extraneous argument label 'c:' in call}} {{14-17=}}
   x.m2(i)(i, i)
   x.m3(i)(b: i, i) // expected-error{{extraneous argument label 'b:' in call}}{{11-14=}}
-  x.m3(i)(b: i, c2: i) // expected-error {{extraneous argument label 'b:' in call}} {{11-14=}}
-  // expected-error@-1 {{extraneous argument label 'c2:' in call}} {{17-21=}}
+  x.m3(i)(b: i, c2: i) // expected-error {{extraneous argument labels 'b:c2:' in call}} {{11-14=}} {{17-21=}}
 }
 
 func testSubscripts(_ i: Int, s: String, x: Y) {

@@ -16,9 +16,8 @@ func test_cfunc2(_ i: Int) {
   let f = cfunc2(i, 17)
 #endif
   _ = f as Float
-  cfunc2(b:17, a:i) // expected-error {{extraneous argument label 'b:' in call}}
-  // expected-error@-1 {{extraneous argument label 'a:' in call}}
-  // expected-error@-2 {{cannot convert value of type 'Int' to expected argument type 'Int32'}}
+  cfunc2(b:17, a:i) // expected-error {{extraneous argument labels 'b:a:' in call}}
+  // expected-error@-1 {{cannot convert value of type 'Int' to expected argument type 'Int32'}}
   cfunc2(17, i) // expected-error{{cannot convert value of type 'Int' to expected argument type 'Int32'}}
 }
 

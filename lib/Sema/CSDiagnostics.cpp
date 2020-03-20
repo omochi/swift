@@ -34,7 +34,6 @@
 #include "swift/Basic/SourceLoc.h"
 #include "swift/Basic/StringExtras.h"
 #include "swift/Parse/Lexer.h"
-#include "swift/Sema/IDETypeChecking.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallString.h"
 #include <string>
@@ -703,54 +702,150 @@ bool GenericArgumentsMismatchFailure::diagnoseAsError() {
   return true;
 }
 
-bool LabelingFailure::diagnoseAsError() {
+bool LabelingFailure::diagnoseAsError() { return diagnoseAsError(false); }
+
+bool LabelingFailure::diagnoseAsNote() { return diagnoseAsError(true); }
+
+bool LabelingFailure::diagnoseAsError(bool asNote) {
   auto *argExpr = getArgumentListExprFor(getLocator());
   if (!argExpr)
     return false;
 
-  auto &cs = getConstraintSystem();
-  auto *anchor = getRawAnchor();
-  return diagnoseArgumentLabelError(cs.getASTContext(), argExpr, CorrectLabels,
-                                    isa<SubscriptExpr>(anchor));
-}
+  SmallString<16> haveStr;
+  SmallString<16> expectedStr;
+  SmallString<16> missingsStr;
+  SmallString<16> extrasStr;
 
-bool LabelingFailure::diagnoseAsNote() {
-  auto *argExpr = getArgumentListExprFor(getLocator());
-  if (!argExpr)
-    return false;
+  unsigned numMissing = 0;
+  unsigned numExtra = 0;
+  unsigned numWrong = 0;
 
-  SmallVector<Identifier, 4> argLabels;
-  if (isa<ParenExpr>(argExpr)) {
-    argLabels.push_back(Identifier());
-  } else if (auto *tuple = dyn_cast<TupleExpr>(argExpr)) {
-    argLabels.append(tuple->getElementNames().begin(),
-                     tuple->getElementNames().end());
-  } else {
-    return false;
-  }
-
-  auto stringifyLabels = [](ArrayRef<Identifier> labels) -> std::string {
-    std::string str;
-    for (auto label : labels) {
-      str += label.empty() ? "_" : label.str();
-      str += ':';
+  auto appendLabelStr = [](SmallString<16> &str, Identifier label) {
+    if (label.empty()) {
+      str += '_';
+    } else {
+      str += label.str();
     }
-    return "(" + str + ")";
+    str += ':';
   };
 
-  auto selectedOverload = getChoiceFor(getLocator());
-  if (!selectedOverload)
-    return false;
+  for (const auto &rel : Relabeling) {
+    const auto argLabel = rel.argLabel;
+    const auto paramLabel = rel.paramLabel;
 
-  const auto &choice = selectedOverload->choice;
-  if (auto *decl = choice.getDeclOrNull()) {
-    emitDiagnostic(decl, diag::candidate_expected_different_labels,
-                   /*plural=*/true, stringifyLabels(argLabels),
-                   stringifyLabels(CorrectLabels));
-    return true;
+    if (argLabel && paramLabel && *argLabel != *paramLabel) {
+      if (argLabel->empty()) {
+        numMissing++;
+        appendLabelStr(missingsStr, *paramLabel);
+      } else if (paramLabel->empty()) {
+        numExtra++;
+        appendLabelStr(extrasStr, *argLabel);
+      } else {
+        numWrong++;
+      }
+    }
+
+    if (argLabel) {
+      appendLabelStr(haveStr, *argLabel);
+    }
+    if (paramLabel) {
+      appendLabelStr(expectedStr, *paramLabel);
+    }
   }
 
-  return false;
+  bool plural = (numMissing + numExtra + numWrong) > 1;
+
+  SourceLoc diagLoc = argExpr->getLoc();
+
+  if (numMissing + numExtra + numWrong == 1) {
+    for (const auto &rel : Relabeling) {
+      if (rel.argLabel) {
+        if (numMissing == 1) {
+          diagLoc = rel.argLoc;
+        } else {
+          diagLoc = rel.argLabelLoc;
+        }
+        break;
+      }
+    }
+  }
+
+  auto escapeLabel = [](Identifier label) -> SmallString<16> {
+    SmallString<16> str;
+    if (canBeArgumentLabel(label.str())) {
+      return label.str();
+    }
+
+    str += "`";
+    str += label.str();
+    str += "`";
+    return str;
+  };
+
+  auto addFixIts = [&](InFlightDiagnostic diag) {
+    for (const auto &rel : Relabeling) {
+      const auto argLabel = rel.argLabel;
+      const auto paramLabel = rel.paramLabel;
+
+      if (!argLabel || !paramLabel)
+        continue;
+
+      if (paramLabel->empty()) {
+        diag.fixItRemoveChars(rel.argLabelLoc, rel.argLoc);
+      } else {
+        auto str = escapeLabel(*paramLabel);
+        if (argLabel->empty()) {
+          str += ": ";
+          diag.fixItInsert(rel.argLoc, str);
+        } else {
+          diag.fixItReplace(rel.argLabelLoc, str);
+        }
+      }
+    }
+  };
+
+  Decl *overloadDecl;
+
+  if (asNote) {
+    auto selectedOverload = getChoiceFor(getLocator());
+    if (!selectedOverload)
+      return false;
+
+    const auto &choice = selectedOverload->choice;
+
+    overloadDecl = choice.getDeclOrNull();
+    if (!overloadDecl)
+      return false;
+  }
+
+  if (numWrong > 0 || (numMissing > 0 && numExtra > 0)) {
+    if (asNote) {
+      emitDiagnostic(overloadDecl, diag::candidate_expected_different_labels,
+                     plural, haveStr, expectedStr);
+    } else {
+      addFixIts(emitDiagnostic(diagLoc, diag::wrong_argument_labels, plural,
+                               haveStr, expectedStr, IsSubscript));
+    }
+  } else if (numMissing > 0) {
+    if (asNote) {
+      emitDiagnostic(overloadDecl, diag::candidate_expected_labeled, plural,
+                     missingsStr);
+    } else {
+      addFixIts(emitDiagnostic(diagLoc, diag::missing_argument_labels, plural,
+                               missingsStr, IsSubscript));
+    }
+  } else {
+    assert(numExtra > 0);
+    if (asNote) {
+      emitDiagnostic(overloadDecl, diag::candidate_expected_unlabeled, plural,
+                     extrasStr);
+    } else {
+      addFixIts(emitDiagnostic(diagLoc, diag::extra_argument_labels, plural,
+                               extrasStr, IsSubscript));
+    }
+  }
+
+  return true;
 }
 
 bool NoEscapeFuncToTypeConversionFailure::diagnoseAsError() {
@@ -4426,102 +4521,6 @@ bool ClosureParamDestructuringFailure::diagnoseAsError() {
   diag.fixItReplace(params->getSourceRange(), nameOS.str())
       .fixItInsert(bodyLoc, OS.str());
   return true;
-}
-
-bool SingleLabelingFailure::diagnoseAsError() {
-  auto *argExpr = getArgumentListExprFor(getLocator());
-  if (!argExpr)
-    return false;
-
-  const auto argList = getOriginalArgumentList(argExpr);
-
-  const auto isSubscript = isa<SubscriptExpr>(getRawAnchor());
-
-  const auto argLabel = argList.labels[ArgIdx];
-  const auto paramLabel = CorrectLabel;
-
-  SmallString<16> argStr;
-  argStr += argLabel.str();
-  argStr += ':';
-
-  SmallString<16> paramStr;
-  paramStr += paramLabel.str();
-  paramStr += ':';
-
-  auto addFixIts = [&](InFlightDiagnostic diag) {
-    if (paramLabel.empty()) {
-      diag.fixItRemoveChars(argList.labelLocs[ArgIdx],
-                            argList.args[ArgIdx]->getStartLoc());
-    } else {
-      bool newNameIsReserved = !canBeArgumentLabel(paramLabel.str());
-
-      llvm::SmallString<16> newStr;
-      if (newNameIsReserved)
-        newStr += "`";
-      newStr += paramLabel.str();
-      if (newNameIsReserved)
-        newStr += "`";
-
-      if (argLabel.empty()) {
-        newStr += ": ";
-        diag.fixItInsert(argList.args[ArgIdx]->getStartLoc(), newStr);
-      } else {
-        diag.fixItReplace(argList.labelLocs[ArgIdx], newStr);
-      }
-    }
-  };
-
-  // Emit the diagnostic.
-  if (paramLabel.empty()) {
-    addFixIts(emitDiagnostic(argList.labelLocs[ArgIdx],
-                             diag::extra_argument_labels,
-                             /*plural=*/false, argStr, isSubscript));
-  } else if (argLabel.empty()) {
-    addFixIts(emitDiagnostic(argList.args[ArgIdx]->getStartLoc(),
-                             diag::missing_argument_labels,
-                             /*plural=*/false, paramStr, isSubscript));
-  } else {
-    addFixIts(emitDiagnostic(argList.labelLocs[ArgIdx],
-                             diag::wrong_argument_labels,
-                             /*plural=*/false, argStr, paramStr, isSubscript));
-  }
-
-  return true;
-}
-
-bool SingleLabelingFailure::diagnoseAsNote() {
-  auto *argExpr = getArgumentListExprFor(getLocator());
-  if (!argExpr)
-    return false;
-
-  const auto argList = getOriginalArgumentList(argExpr);
-
-  const auto argLabel = argList.labels[ArgIdx];
-  const auto paramLabel = CorrectLabel;
-
-  SmallString<16> argStr;
-  argStr += argLabel.str();
-  argStr += ':';
-
-  SmallString<16> paramStr;
-  paramStr += paramLabel.str();
-  paramStr += ':';
-
-  if (auto selectedOverload = getChoiceFor(getLocator())) {
-    const auto &choice = selectedOverload->choice;
-    if (auto *decl = choice.getDeclOrNull()) {
-      if (argLabel.empty()) {
-        emitDiagnostic(decl, diag::candidate_expected_labeled, paramStr);
-      } else if (paramLabel.empty()) {
-        emitDiagnostic(decl, diag::candidate_expected_unlabeled, argStr);
-      } else {
-        emitDiagnostic(decl, diag::candidate_expected_different_labels,
-                       /*plural=*/false, argStr, paramStr);
-      }
-      return true;
-    }
-  }
-  return false;
 }
 
 bool OutOfOrderArgumentFailure::diagnoseAsError() {

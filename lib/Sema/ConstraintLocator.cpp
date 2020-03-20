@@ -61,6 +61,7 @@ void ConstraintLocator::Profile(llvm::FoldingSetNodeID &id, Expr *anchor,
     case NamedTupleElement:
     case TupleElement:
     case ApplyArgToParam:
+    case ArgumentLabel:
     case OpenedGeneric:
     case KeyPathComponent:
     case ConditionalRequirement:
@@ -84,6 +85,7 @@ void ConstraintLocator::Profile(llvm::FoldingSetNodeID &id, Expr *anchor,
 
 unsigned LocatorPathElt::getNewSummaryFlags() const {
   switch (getKind()) {
+  case ConstraintLocator::ArgumentLabel:
   case ConstraintLocator::ApplyArgument:
   case ConstraintLocator::ApplyFunction:
   case ConstraintLocator::SequenceElementType:
@@ -325,6 +327,13 @@ void ConstraintLocator::dump(SourceManager *sm, raw_ostream &out) const {
         out << " (non-ephemeral)";
       break;
     }
+
+    case ArgumentLabel: {
+      auto argElt = elt.castTo<LocatorPathElt::ArgumentLabel>();
+      out << "argument label #" << llvm::utostr(argElt.getArgIdx());
+      break;
+    }
+
     case ClosureResult:
       out << "closure result";
       break;
