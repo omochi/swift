@@ -719,12 +719,14 @@ matchCallArguments(SmallVectorImpl<AnyFunctionType::Param> &args,
       unsigned paramIdx = 0;
       while (argIdx < numArgs) {
         if (!argBindings[argIdx]) {
-          if (!claimedArgs[argIdx]) {
-            // extra argument
-            argIdxs.push_back(argIdx);
-            paramIdxs.push_back(None);
-          } else {
-            // skip variadic tail
+          if (!isTrailingClosureArgument(argIdx)) {
+            if (!claimedArgs[argIdx]) {
+              // extra argument
+              argIdxs.push_back(argIdx);
+              paramIdxs.push_back(None);
+            } else {
+              // skip variadic tail
+            }
           }
           argIdx++;
           continue;
@@ -743,8 +745,10 @@ matchCallArguments(SmallVectorImpl<AnyFunctionType::Param> &args,
           paramIdxs.push_back(paramIdx);
         }
 
-        argIdxs.push_back(argIdx);
-        paramIdxs.push_back(paramIdx);
+        if (!isTrailingClosureArgument(argIdx)) {
+          argIdxs.push_back(argIdx);
+          paramIdxs.push_back(paramIdx);
+        }
         argIdx++;
         paramIdx++;
       }

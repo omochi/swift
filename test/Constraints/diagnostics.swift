@@ -1412,3 +1412,11 @@ func foo(frame: Frame) {
     // expected-note@-1 {{overloads for '+' exist with these partially matching parameter lists: (Double, Double), (Int, Int)}}
 
 }
+
+struct RelabelAndTrailingClosure {
+  func f(aa: Int, bb: Int, cc: () -> Void) {}
+
+  func test() {
+    f(aax: 1, bbx: 1) {} // expected-error {{incorrect argument labels in call (have 'aax:bbx:', expected 'aa:bb:')}} {{7-10=aa}} {{15-18=bb}}
+  }
+}
