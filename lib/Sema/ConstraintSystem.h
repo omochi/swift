@@ -4736,17 +4736,6 @@ public:
   /// otherwise.
   virtual bool outOfOrderArgument(unsigned argIdx, unsigned prevArgIdx);
 
-  /// Indicates that the arguments need to be relabeled to match the parameters.
-  ///
-  /// \param argIdxs Mapped arguments list. None is missing argument.
-  /// \param paramIdxs Mapped parameter list. None is extra argument.
-  ///
-  /// \returns true to indicate that this should cause a failure, false
-  /// otherwise.
-  virtual bool relabelArguments(ArrayRef<Optional<unsigned>> argIdxs,
-                                ArrayRef<Optional<unsigned>> paramIdxs,
-                                unsigned numOutOfOrder);
-
   /// Indicates that the trailing closure argument at the given \c argIdx
   /// cannot be passed to the last parameter at \c paramIdx.
   ///

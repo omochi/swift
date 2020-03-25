@@ -71,6 +71,12 @@ enum class FixKind : uint8_t {
   /// Mark function type as explicitly '@escaping'.
   ExplicitlyEscaping,
 
+  /// Labeling failure associated with a particular argument, could be a
+  /// missing, extraneous or incorrect label.
+  /// Let fix the problem by suggesting a new label aligned with parameter at
+  /// the same position.
+  RelabelArgument,
+
   /// Arguments have labeling failures - missing/extraneous or incorrect
   /// labels attached to the, fix it by suggesting proper labels.
   RelabelArguments,
@@ -348,14 +354,54 @@ public:
 };
 
 struct ArgumentRelabelingItem {
-  // None is missing argument
-  Optional<Identifier> argLabel;
+  Identifier argLabel;
   SourceLoc argLabelLoc;
   SourceLoc argLoc;
-  // None is extra argument
-  Optional<Identifier> paramLabel;
+  Identifier paramLabel;
+
+  ArgumentRelabelingItem(Identifier argLabel = Identifier(),
+                         SourceLoc argLabelLoc = SourceLoc(),
+                         SourceLoc argLoc = SourceLoc(),
+                         Identifier paramLabel = Identifier())
+      : argLabel(argLabel), argLabeLoc(argLabelLoc), argLoc(argLoc),
+        paramLabel(paramLabel) {}
 };
 using ArgumentRelabeling = SmallVector<ArgumentRelabelingItem, 4>;
+
+/// Labeling failure associated with a particular argument, could be a missing,
+/// extraneous or incorrect label. Let fix the problem by suggesting a new label
+/// aligned with parameter at the same position.
+class RelabelArgument final : public ConstraintFix {
+  Identifier ArgLabel;
+  SourceLoc ArgLabelLoc;
+  SourceLoc ArgLoc;
+  Identifier ParamLabel;
+  bool IsSubscript;
+
+  RelabelArgument(ConstraintSystem &cs, Identifier argLabel,
+                  SourceLoc argLabelLoc, SourceLoc argLoc,
+                  Identifier paramLabel, bool isSubscript,
+                  ConstraintLocator *locator)
+      : ConstraintFix(cs, FixKind::RelabelArgument, locator),
+        ArgLabel(argLabel), ArgLabelLoc(argLabelLoc), ArgLoc(argLoc),
+        ParamLabel(paramLabel), IsSubscript(isSubscript) {}
+
+public:
+  std::string getName() const override { return "re-label argument"; }
+
+  bool coalesceAndDiagnose(const Solution &solution,
+                           ArrayRef<ConstraintFix *> secondaryFixes,
+                           bool asNote = false) const override;
+
+  bool diagnose(const Solution &solution, bool asNote = false) const override {
+    return coalesceAndDiagnose(solution, ArrayRef<ConstraintFix *>(), asNote);
+  }
+
+  static RelabelArgument *create(ConstraintSystem &cs, Identifier argLabel,
+                                 SourceLoc argLabelLoc, SourceLoc argLoc,
+                                 Identifier paramLabel, bool isSubscript,
+                                 ConstraintLocator *locator);
+};
 
 /// Arguments have labeling failures - missing/extraneous or incorrect
 /// labels attached to the, fix it by suggesting proper labels.

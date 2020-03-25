@@ -733,24 +733,20 @@ bool LabelingFailure::diagnoseAsError(bool asNote) {
     const auto argLabel = rel.argLabel;
     const auto paramLabel = rel.paramLabel;
 
-    if (argLabel && paramLabel && *argLabel != *paramLabel) {
-      if (argLabel->empty()) {
+    if (argLabel != paramLabel) {
+      if (argLabel.empty()) {
         numMissing++;
-        appendLabelStr(missingsStr, *paramLabel);
-      } else if (paramLabel->empty()) {
+        appendLabelStr(missingsStr, paramLabel);
+      } else if (paramLabel.empty()) {
         numExtra++;
-        appendLabelStr(extrasStr, *argLabel);
+        appendLabelStr(extrasStr, argLabel);
       } else {
         numWrong++;
       }
     }
 
-    if (argLabel) {
-      appendLabelStr(haveStr, *argLabel);
-    }
-    if (paramLabel) {
-      appendLabelStr(expectedStr, *paramLabel);
-    }
+    appendLabelStr(haveStr, argLabel);
+    appendLabelStr(expectedStr, paramLabel);
   }
 
   bool plural = (numMissing + numExtra + numWrong) > 1;
@@ -759,14 +755,12 @@ bool LabelingFailure::diagnoseAsError(bool asNote) {
 
   if (numMissing + numExtra + numWrong == 1) {
     for (const auto &rel : Relabeling) {
-      if (rel.argLabel) {
-        if (numMissing == 1) {
-          diagLoc = rel.argLoc;
-        } else {
-          diagLoc = rel.argLabelLoc;
-        }
-        break;
+      if (numMissing == 1) {
+        diagLoc = rel.argLoc;
+      } else {
+        diagLoc = rel.argLabelLoc;
       }
+      break;
     }
   }
 
@@ -787,14 +781,11 @@ bool LabelingFailure::diagnoseAsError(bool asNote) {
       const auto argLabel = rel.argLabel;
       const auto paramLabel = rel.paramLabel;
 
-      if (!argLabel || !paramLabel)
-        continue;
-
-      if (paramLabel->empty()) {
+      if (paramLabel.empty()) {
         diag.fixItRemoveChars(rel.argLabelLoc, rel.argLoc);
       } else {
-        auto str = escapeLabel(*paramLabel);
-        if (argLabel->empty()) {
+        auto str = escapeLabel(paramLabel);
+        if (argLabel.empty()) {
           str += ": ";
           diag.fixItInsert(rel.argLoc, str);
         } else {

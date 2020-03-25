@@ -643,9 +643,6 @@ matchCallArguments(SmallVectorImpl<AnyFunctionType::Param> &args,
     }
 
     SmallVector<bool, 4> labelFailedArgs(args.size());
-    unsigned numLabelMissing = 0;
-    unsigned numLabelExtra = 0;
-    unsigned numLabelWrong = 0;
     SmallVector<Optional<unsigned>, 4> outOfOrderArgs(args.size());
     unsigned numOutOfOrder = 0;
 
@@ -662,13 +659,6 @@ matchCallArguments(SmallVectorImpl<AnyFunctionType::Param> &args,
       // check label mismatch
       if (!isTrailingClosureArgument(argIdx) && paramLabel != argLabel) {
         labelFailedArgs[argIdx] = true;
-        if (argLabel.empty()) {
-          numLabelMissing++;
-        } else if (paramLabel.empty()) {
-          numLabelExtra++;
-        } else {
-          numLabelWrong++;
-        }
       }
 
       // check out of order
@@ -684,50 +674,30 @@ matchCallArguments(SmallVectorImpl<AnyFunctionType::Param> &args,
       }
     }
 
-    bool doesAggregatesDiagnostics = false;
+    bool doesUsePositionalMapping = false;
 
     // If reordering source or destination have labeling failure,
     // diagnostic message would be confusing.
-    // In this case, fallback to aggregated diagnostics.
+    // In this case, use positional mapping which
+    // is not based on `parameterBindings`
     if (numOutOfOrder > 0) {
       for (auto argIdx : indices(args)) {
         auto leftArgIdx = outOfOrderArgs[argIdx];
         if (!leftArgIdx)
           continue;
         if (labelFailedArgs[argIdx] || labelFailedArgs[*leftArgIdx]) {
-          doesAggregatesDiagnostics = true;
+          doesUsePositionalMapping = true;
           break;
         }
       }
     }
 
-    // If all multiple labeling failures have same category,
-    // aggregates diagnostics
-    if (!doesAggregatesDiagnostics && numOutOfOrder == 0) {
-      if ((numLabelMissing > 1 && numLabelExtra == 0 && numLabelWrong == 0) ||
-          (numLabelMissing == 0 && numLabelExtra > 1 && numLabelWrong == 0) ||
-          (numLabelMissing == 0 && numLabelExtra == 0 && numLabelWrong > 1)) {
-        doesAggregatesDiagnostics = true;
-      }
-    }
-
-    if (doesAggregatesDiagnostics) {
-      SmallVector<Optional<unsigned>, 4> argIdxs;
-      SmallVector<Optional<unsigned>, 4> paramIdxs;
-
+    if (doesUsePositionalMapping) {
       unsigned argIdx = 0;
       unsigned paramIdx = 0;
       while (argIdx < numArgs) {
         if (!argBindings[argIdx]) {
-          if (!isTrailingClosureArgument(argIdx)) {
-            if (!claimedArgs[argIdx]) {
-              // extra argument
-              argIdxs.push_back(argIdx);
-              paramIdxs.push_back(None);
-            } else {
-              // skip variadic tail
-            }
-          }
+          // extra argument or variadic tail
           argIdx++;
           continue;
         }
@@ -735,59 +705,56 @@ matchCallArguments(SmallVectorImpl<AnyFunctionType::Param> &args,
         for (; paramIdx < params.size(); paramIdx++) {
           if (!parameterBindings[paramIdx].empty())
             break;
-
-          if (params[paramIdx].isVariadic() ||
-              paramInfo.hasDefaultArgument(paramIdx))
-            continue;
-
-          // missing argument
-          argIdxs.push_back(None);
-          paramIdxs.push_back(paramIdx);
+          // empty variadics, defaulted, or missing argument
         }
 
         if (!isTrailingClosureArgument(argIdx)) {
-          argIdxs.push_back(argIdx);
-          paramIdxs.push_back(paramIdx);
+          const auto paramLabel = params[paramIdx].getLabel();
+          const auto argLabel = args[argIdx].getLabel();
+
+          if (paramLabel != argLabel) {
+            if (argLabel.empty()) {
+              if (listener.missingLabel(paramIdx))
+                return true;
+            } else if (paramLabel.empty()) {
+              if (listener.extraneousLabel(paramIdx))
+                return true;
+            } else {
+              if (listener.incorrectLabel(paramIdx))
+                return true;
+            }
+          }
         }
+
         argIdx++;
         paramIdx++;
       }
-      for (; paramIdx < params.size(); paramIdx++) {
-        if (params[paramIdx].isVariadic() ||
-            paramInfo.hasDefaultArgument(paramIdx))
-          continue;
 
-        // missing argumnet
-        argIdxs.push_back(None);
-        paramIdxs.push_back(paramIdx);
-      }
+      return false;
+    }
 
-      if (listener.relabelArguments(argIdxs, paramIdxs, numOutOfOrder))
-        return true;
-    } else {
-      for (auto paramIdx : indices(params)) {
-        if (parameterBindings[paramIdx].empty())
-          continue;
-        auto argIdx = parameterBindings[paramIdx].front();
-        if (labelFailedArgs[argIdx]) {
-          const auto argLabel = args[argIdx].getLabel();
-          const auto paramLabel = params[paramIdx].getLabel();
-          if (argLabel.empty()) {
-            if (listener.missingLabel(paramIdx))
-              return true;
-          } else if (paramLabel.empty()) {
-            if (listener.extraneousLabel(paramIdx))
-              return true;
-          } else {
-            if (listener.incorrectLabel(paramIdx))
-              return true;
-          }
-        }
-        auto leftArgIdx = outOfOrderArgs[argIdx];
-        if (leftArgIdx) {
-          if (listener.outOfOrderArgument(argIdx, *leftArgIdx))
+    for (auto paramIdx : indices(params)) {
+      if (parameterBindings[paramIdx].empty())
+        continue;
+      auto argIdx = parameterBindings[paramIdx].front();
+      if (labelFailedArgs[argIdx]) {
+        const auto argLabel = args[argIdx].getLabel();
+        const auto paramLabel = params[paramIdx].getLabel();
+        if (argLabel.empty()) {
+          if (listener.missingLabel(paramIdx))
+            return true;
+        } else if (paramLabel.empty()) {
+          if (listener.extraneousLabel(paramIdx))
+            return true;
+        } else {
+          if (listener.incorrectLabel(paramIdx))
             return true;
         }
+      }
+      auto leftArgIdx = outOfOrderArgs[argIdx];
+      if (leftArgIdx) {
+        if (listener.outOfOrderArgument(argIdx, *leftArgIdx))
+          return true;
       }
     }
   }
@@ -882,27 +849,21 @@ public:
 
     auto argIdx = Bindings[paramIdx].front();
 
-    ArgumentRelabelingItem item;
     const auto argLabel = Arguments[argIdx].getLabel();
-    item.argLabel = argLabel;
+    SourceLoc argLabelLoc;
+    SourceLoc argLoc;
     if (tupleExpr) {
-      item.argLabelLoc = tupleExpr->getElementNameLoc(argIdx);
-      item.argLoc = tupleExpr->getElement(argIdx)->getLoc();
+      argLabelLoc = tupleExpr->getElementNameLoc(argIdx);
+      argLoc = tupleExpr->getElement(argIdx)->getLoc();
     }
     if (parenExpr) {
-      item.argLoc = parenExpr->getSubExpr()->getLoc();
+      argLoc = parenExpr->getSubExpr()->getLoc();
     }
     const auto paramLabel = Parameters[paramIdx].getLabel();
-    item.paramLabel = paramLabel;
 
-    ArgumentRelabeling relabeling;
-    relabeling.push_back(item);
-
-    auto *labelLocator =
-        CS.getConstraintLocator(locator, LocatorPathElt::ArgumentLabel(argIdx));
-
-    auto *fix = RelabelArguments::create(
-        CS, relabeling, isa<SubscriptExpr>(callExpr), labelLocator);
+    auto *fix =
+        RelabelArguments::create(CS, argLabel, argLabelLoc, argLoc, paramLoc,
+                                 isa<SubscriptExpr>(callExpr), locator);
     return CS.recordFix(fix, impact);
   }
 
@@ -938,89 +899,6 @@ public:
     }
 
     return true;
-  }
-
-  bool relabelArguments(ArrayRef<Optional<unsigned>> argIdxs,
-                        ArrayRef<Optional<unsigned>> paramIdxs,
-                        unsigned numOutOfOrder) override {
-    if (!CS.shouldAttemptFixes())
-      return true;
-
-    // TODO(diagnostics): If re-labeling is mixed with extra arguments,
-    // let's produce a fix only for extraneous arguments for now,
-    // because they'd share a locator path which (currently) means
-    // one fix would overwrite another.
-    if (!ExtraArguments.empty()) {
-      CS.increaseScore(SK_Fix);
-      return false;
-    }
-
-    auto *locator = CS.getConstraintLocator(Locator);
-
-    Expr *callExpr = locator->getAnchor();
-    if (!callExpr)
-      return true;
-    auto locatorExpr = simplifyLocatorToAnchor(locator);
-    TupleExpr *tupleExpr = dyn_cast<TupleExpr>(locatorExpr);
-    ParenExpr *parenExpr = dyn_cast<ParenExpr>(locatorExpr);
-    if (!tupleExpr && !parenExpr)
-      return true;
-
-    unsigned numMissing = 0;
-    unsigned numExtra = 0;
-    unsigned numWrong = 0;
-
-    ArgumentRelabeling relabeling;
-    for (auto i : indices(argIdxs)) {
-      auto argIdx = argIdxs[i];
-      auto paramIdx = paramIdxs[i];
-
-      ArgumentRelabelingItem item;
-
-      if (argIdx) {
-        const auto argLabel = Arguments[*argIdx].getLabel();
-        item.argLabel = argLabel;
-        if (tupleExpr) {
-          item.argLabelLoc = tupleExpr->getElementNameLoc(*argIdx);
-          item.argLoc = tupleExpr->getElement(*argIdx)->getLoc();
-        }
-        if (parenExpr) {
-          item.argLoc = parenExpr->getSubExpr()->getLoc();
-        }
-      }
-
-      if (paramIdx) {
-        const auto paramLabel = Parameters[*paramIdx].getLabel();
-        item.paramLabel = paramLabel;
-      }
-
-      relabeling.push_back(item);
-
-      if (argIdx && paramIdx) {
-        const auto argLabel = Arguments[*argIdx].getLabel();
-        const auto paramLabel = Parameters[*paramIdx].getLabel();
-
-        if (argLabel != paramLabel) {
-          if (argLabel.empty()) {
-            numMissing++;
-          } else if (paramLabel.empty()) {
-            numExtra++;
-          } else {
-            numWrong++;
-          }
-        }
-      }
-    }
-
-    auto *fix = RelabelArguments::create(CS, relabeling,
-                                         isa<SubscriptExpr>(callExpr), locator);
-
-    // Re-labeling fixes with extraneous/incorrect labels should be
-    // lower priority vs. other fixes on same/different overload(s)
-    // where labels did line up correctly.
-    unsigned impact = numMissing + numExtra * 3 + numWrong * 4 + numOutOfOrder;
-
-    return CS.recordFix(fix, impact);
   }
 
   bool trailingClosureMismatch(unsigned paramIdx, unsigned argIdx) override {
@@ -9428,6 +9306,7 @@ ConstraintSystem::SolutionKind ConstraintSystem::simplifyFixConstraint(
 
   case FixKind::UseSubscriptOperator:
   case FixKind::ExplicitlyEscaping:
+  case FixKind::RelabelArgument:
   case FixKind::RelabelArguments:
   case FixKind::RemoveCall:
   case FixKind::RemoveUnwrap:

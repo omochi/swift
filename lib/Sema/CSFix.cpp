@@ -170,6 +170,74 @@ MarkExplicitlyEscaping::create(ConstraintSystem &cs, Type lhs, Type rhs,
   return new (cs.getAllocator()) MarkExplicitlyEscaping(cs, lhs, rhs, locator);
 }
 
+bool RelabelArgument::coalesceAndDiagnose(
+    const Solution &solution, ArrayRef<ConstraintFix *> secondaryFixes,
+    bool asNote) const {
+  SmallVector<RelabelArgument *, 4> fixes;
+  fixes.push_back(this);
+  for (auto secondaryFix : secondaryFixes) {
+    if (auto fix = dyn_cast<ConstraintFix *>(secondaryFix)) {
+      fixes.push_back(fix);
+    }
+  }
+
+  auto sourceMgr = getConstraintSystem().getASTContext().SourceMgr;
+  llvm::sort(fixes, [&](RelabelArgument *a, RelabelArgument *b) {
+    return sourceMgr.isBeforeInBuffer(a->ArgLoc, b->ArgLoc);
+  });
+
+  unsigned numMissing = 0;
+  unsigned numExtra = 0;
+  unsigned numWrong = 0;
+  for (auto fix : fixes) {
+    if (fix->ArgLabel != fix->ParamLabel) {
+      if (fix->ArgLabel.empty()) {
+        numMissing++;
+      } else if (fix->ParamLabel.empty()) {
+        numExtra++;
+      } else {
+        numWrong++;
+      }
+    }
+  }
+
+  // If all label issues have same category,
+  // it aggregates diagnostics.
+  if ((numMissing > 0 && numExtra == 0 && numWrong == 0) ||
+      (numMissing == 0 && numExtra > 0 && numWrong == 0) ||
+      (numMissing == 0 && numExtra == 0 && numWrong > 0)) {
+    ArgumentRelabeling relabeling;
+    bool isSubscript = false;
+    for (auto fix : fixes) {
+      relabeling.push_back(ArgumentRelabelingItem(
+          fix->ArgLabel, fix->ArgLabelLoc, fix->ArgLoc, fix->ParamLabel));
+      isSubscript = isSubscript || fix->IsSubscript;
+    }
+    LabelingFailure failure(solution, getLocator(), relabeling, isSubscript);
+    return failure.diagnose(asNote);
+  }
+
+  bool diagnosed = false;
+  for (auto fix : fixes) {
+    ArgumentRelabeling relabeling;
+    relabeling.push_back(ArgumentRelabelingItem(fix->ArgLabel, fix->ArgLabelLoc,
+                                                fix->ArgLoc, fix->ParamLabel));
+    LabelingFailure failure(solution, getLocator(), relabeling,
+                            fix->IsSubscript);
+    diagnosed = failure.diagnose(asNote) || diagnosed;
+  }
+  return diagnosed;
+}
+
+RelabelArgument *
+RelabelArgument::create(ConstraintSystem &cs, Identifier argLabel,
+                        SourceLoc argLabelLoc, SourceLoc argLoc,
+                        Identifier paramLabel, bool isSubscript,
+                        ConstraintLocator *locator) {
+  return new (cs.getAllocator()) RelabelArgument(
+      cs, argLabel, argLabelLoc, argLoc, paramLabel, isSubscript, locator);
+}
+
 bool RelabelArguments::diagnose(const Solution &solution, bool asNote) const {
   LabelingFailure failure(solution, getLocator(), Relabeling, IsSubscript);
   return failure.diagnose(asNote);
